@@ -1,0 +1,176 @@
+//! Typed client bindings for the gaffer D-Bus API.
+//!
+//! Reading the whole world goes through `org.freedesktop.DBus.ObjectManager`,
+//! which returns every light and every property in a single round trip — and,
+//! more usefully, tells us about lights appearing and disappearing without any
+//! bespoke signal of gaffer's own.
+
+use std::collections::HashMap;
+
+use anyhow::{Context, Result};
+use futures_util::stream::SelectAll;
+use zbus::fdo::PropertiesChangedStream;
+use zbus::zvariant::OwnedValue;
+
+/// The well-known name the daemon owns.
+pub const BUS_NAME: &str = "io.mineiro.gaffer";
+/// Root object path.
+pub const ROOT_PATH: &str = "/io/mineiro/gaffer";
+/// Interface every light — and the group — implements.
+pub const LIGHT_INTERFACE: &str = "io.mineiro.gaffer.Light1";
+
+#[zbus::proxy(
+    interface = "io.mineiro.gaffer.Manager1",
+    default_service = "io.mineiro.gaffer",
+    default_path = "/io/mineiro/gaffer"
+)]
+pub trait Manager {
+    /// Apply value tokens to whatever the selector matches; returns matched ids.
+    fn set_state(&self, selector: &str, tokens: Vec<String>) -> zbus::Result<Vec<String>>;
+
+    /// Blink whatever the selector matches; returns matched ids.
+    fn identify(&self, selector: &str) -> zbus::Result<Vec<String>>;
+
+    /// Re-probe the network and re-read every light.
+    fn rescan(&self) -> zbus::Result<()>;
+
+    #[zbus(property)]
+    fn version(&self) -> zbus::Result<String>;
+}
+
+/// A snapshot of one light as the daemon sees it.
+#[derive(Clone, Debug, Default)]
+pub struct LightInfo {
+    /// D-Bus object path, used to subscribe to this light's property changes.
+    pub path: String,
+    pub id: String,
+    pub name: String,
+    pub model: String,
+    pub firmware: String,
+    pub address: String,
+    pub online: bool,
+    pub online_count: u32,
+    pub on: bool,
+    pub brightness: u8,
+    pub kelvin: u16,
+    pub last_error: String,
+}
+
+impl LightInfo {
+    /// The group object has no hardware id; that is what distinguishes it.
+    pub fn is_group(&self) -> bool {
+        self.id.is_empty()
+    }
+
+    /// One-word summary for display.
+    pub fn state_word(&self) -> &'static str {
+        if !self.online {
+            "offline"
+        } else if self.on {
+            "on"
+        } else {
+            "off"
+        }
+    }
+}
+
+/// Connect to the session bus. D-Bus activation starts the daemon if needed.
+pub async fn connect() -> Result<zbus::Connection> {
+    zbus::Connection::session().await.context("connecting to the D-Bus session bus")
+}
+
+/// Fetch every light, group last.
+pub async fn lights(connection: &zbus::Connection) -> Result<Vec<LightInfo>> {
+    let object_manager = zbus::fdo::ObjectManagerProxy::builder(connection)
+        .destination(BUS_NAME)?
+        .path(ROOT_PATH)?
+        .build()
+        .await
+        .context("building the object-manager proxy")?;
+
+    let managed = object_manager
+        .get_managed_objects()
+        .await
+        .with_context(|| format!("asking {BUS_NAME} for its lights (is gafferd able to start?)"))?;
+
+    let mut lights: Vec<LightInfo> = managed
+        .into_iter()
+        .filter_map(|(path, interfaces)| {
+            let properties = interfaces.get(LIGHT_INTERFACE)?;
+            Some(from_properties(path.as_str(), properties))
+        })
+        .collect();
+
+    // Group last, then alphabetical: the individual lights are what you scan
+    // for, and the summary reads better as a footer.
+    lights.sort_by(|a, b| a.is_group().cmp(&b.is_group()).then_with(|| a.name.cmp(&b.name)));
+    Ok(lights)
+}
+
+fn from_properties(path: &str, properties: &HashMap<String, OwnedValue>) -> LightInfo {
+    LightInfo {
+        path: path.to_string(),
+        id: string(properties, "Id"),
+        name: string(properties, "Name"),
+        model: string(properties, "Model"),
+        firmware: string(properties, "Firmware"),
+        address: string(properties, "Address"),
+        online: boolean(properties, "Online"),
+        online_count: number(properties, "OnlineCount"),
+        on: boolean(properties, "On"),
+        brightness: number(properties, "Brightness"),
+        kelvin: number(properties, "Kelvin"),
+        last_error: string(properties, "LastError"),
+    }
+}
+
+fn string(properties: &HashMap<String, OwnedValue>, key: &str) -> String {
+    properties.get(key).and_then(|value| String::try_from(value.clone()).ok()).unwrap_or_default()
+}
+
+fn boolean(properties: &HashMap<String, OwnedValue>, key: &str) -> bool {
+    properties.get(key).and_then(|value| bool::try_from(value.clone()).ok()).unwrap_or_default()
+}
+
+fn number<T: TryFrom<OwnedValue> + Default>(
+    properties: &HashMap<String, OwnedValue>,
+    key: &str,
+) -> T {
+    properties.get(key).and_then(|value| T::try_from(value.clone()).ok()).unwrap_or_default()
+}
+
+/// Proxy for the daemon's object manager.
+pub async fn object_manager(
+    connection: &zbus::Connection,
+) -> Result<zbus::fdo::ObjectManagerProxy<'static>> {
+    zbus::fdo::ObjectManagerProxy::builder(connection)
+        .destination(BUS_NAME)?
+        .path(ROOT_PATH)?
+        .build()
+        .await
+        .context("building the object-manager proxy")
+}
+
+/// A merged stream of `PropertiesChanged` for every light, group included.
+///
+/// Built from per-object `PropertiesProxy` streams rather than one raw match
+/// rule: zbus routes proxy subscriptions itself, and this keeps the signal
+/// plumbing to well-trodden API.
+pub async fn property_changes(
+    connection: &zbus::Connection,
+    lights: &[LightInfo],
+) -> Result<SelectAll<PropertiesChangedStream>> {
+    let mut merged = SelectAll::new();
+
+    for light in lights {
+        let properties = zbus::fdo::PropertiesProxy::builder(connection)
+            .destination(BUS_NAME)?
+            .path(light.path.clone())?
+            .build()
+            .await
+            .with_context(|| format!("watching {}", light.path))?;
+        merged.push(properties.receive_properties_changed().await?);
+    }
+
+    Ok(merged)
+}

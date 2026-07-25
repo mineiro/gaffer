@@ -1,0 +1,11 @@
+[package]
+name = "gaffer-core"
+description = "Pure light-control logic shared by gafferd and the gaffer CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# Intentionally dependency-free: this crate performs no I/O so it stays
+# trivially testable. Anything needing a socket belongs in gafferd.
+[dependencies]

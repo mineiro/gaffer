@@ -1,0 +1,45 @@
+[Unit]
+Description=gaffer — studio light daemon
+Documentation=https://github.com/jnetto/gaffer
+# The session bus is the daemon's entire client API, so there is no point
+# starting without it.
+After=dbus.socket
+Requires=dbus.socket
+
+[Service]
+# Type=dbus makes systemd consider the unit started once the well-known name is
+# on the bus — which gafferd claims only after every object is registered. A
+# client that activates gaffer therefore never races against an empty tree.
+Type=dbus
+BusName=io.mineiro.gaffer
+ExecStart=@BINDIR@/gafferd
+Restart=on-failure
+RestartSec=2s
+
+# Logging goes to stderr and is picked up by the journal:
+#   journalctl --user -u gaffer -f
+# Raise verbosity with: systemctl --user set-environment GAFFER_LOG=debug
+Environment=GAFFER_LOG=info
+
+# The daemon needs the network and nothing else. These are the hardening knobs
+# that are safe for a user unit that must keep multicast DNS working.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+# AF_NETLINK is required: enumerating interfaces for mDNS goes through it.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+# Optional. D-Bus activation already starts gaffer on first use; enabling the
+# service as well keeps it warm from login so discovery has already settled by
+# the time you press a key.
+WantedBy=default.target

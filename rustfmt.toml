@@ -1,0 +1,4 @@
+# Keep short constructs on one line. The default heuristics split struct
+# literals and calls aggressively, which pushes a lot of trivially readable
+# code onto four lines each.
+use_small_heuristics = "Max"

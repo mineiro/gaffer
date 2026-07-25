@@ -1,0 +1,7 @@
+[D-BUS Service]
+Name=io.mineiro.gaffer
+# Exec is mandatory per the spec, but SystemdService takes precedence: dbus
+# hands activation to systemd so the daemon gets a proper cgroup, journal
+# capture and restart policy instead of being an orphan child of dbus-daemon.
+Exec=@BINDIR@/gafferd
+SystemdService=gaffer.service

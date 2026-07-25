@@ -1,0 +1,12 @@
+# Build output.
+/target
+
+# rustfmt backups (legacy).
+**/*.rs.bk
+
+# Debug symbols. Normal builds keep these inside target/, but they escape when
+# profiling, packaging, or copying a binary out of the tree — and a stripped
+# release binary plus its symbols is a large thing to commit by accident.
+*.pdb
+*.dwp
+*.dwo
