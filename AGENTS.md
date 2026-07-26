@@ -279,6 +279,36 @@ Assert behaviour, not paths, in that test: nixpkgs relocates user units from
 `lib/systemd/user` to `share/systemd/user` during fixup, so a path assertion
 tests nixpkgs' conventions rather than this module.
 
+## Gangs (links)
+
+`gaffer_core::link` is the whole model, and it is pure. A gang holds each
+member's brightness **offset from a notional level**; moving any member
+re-derives the level and every other member follows. Deriving the level from
+the mover each time, rather than accumulating it, is what makes a *symmetric*
+link safe — `resolving_is_idempotent_so_a_link_cannot_oscillate` pins that, and
+it is the property the whole feature rests on.
+
+Rules the design fixes, all of them tested:
+
+- **Brightness offsets; temperature and power mirror.** The link editor shows
+  `brt` in two columns and a single `tmp` spanning both.
+- **Power gangs.** The pair collapses to one card because it is one
+  instrument. Wanting to switch one lamp alone means the link is wrong for that
+  moment — unlink, do not add a per-lamp power affordance.
+- **Offset subsumes mirror**, so it is the default: a pair that already matches
+  learns an offset of zero and behaves as a mirror. `Mirror` is the explicit,
+  destructive choice because it overwrites one lamp's values with another's.
+- **The level is not clamped, members are.** Pushing a gang to the ceiling
+  compresses it and restores the spacing on the way down, rather than rewriting
+  the offsets or leaving dead travel.
+- **A lamp is in at most one gang**, which is what lets a panel draw one wire
+  per port.
+
+Propagation happens once, inside `World::apply`, and never re-enters. Gangs are
+deliberately *not* expanded when the reconciler adopts hardware state: links
+propagate user intent, not observations, or a light changed from Elgato's own
+app would fight the 15 s refresh.
+
 ## Security Model
 
 gaffer runs unprivileged in the user's session and holds no credentials. Two

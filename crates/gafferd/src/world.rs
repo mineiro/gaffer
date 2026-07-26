@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Instant;
 
-use gaffer_core::{Adjust, LightState, Power, Selector, StatePatch, group};
+use gaffer_core::{Adjust, LightState, Link, Power, Selector, StatePatch, group};
 
 /// Stable identity of a light — the `id=` field from its mDNS TXT record.
 pub type LightId = String;
@@ -108,6 +108,17 @@ impl LightRecord {
     }
 }
 
+impl LightRecord {
+    /// Move this lamp without touching its gang.
+    ///
+    /// Only alt-drag uses this: every other path goes through `World::apply`,
+    /// which expands gangs. Bypassing propagation is what lets the user set a
+    /// new difference instead of dragging the whole instrument.
+    pub fn set_desired_alone(&mut self, next: LightState) -> Option<Changed> {
+        self.set_desired(next, Instant::now())
+    }
+}
+
 /// Which lights a mutation addresses.
 #[derive(Clone, Debug)]
 pub enum Target {
@@ -153,6 +164,9 @@ impl Changed {
 #[derive(Debug, Default)]
 pub struct World {
     lights: BTreeMap<LightId, LightRecord>,
+    /// Gangs. A lamp belongs to at most one, which is what lets the panel draw
+    /// a single wire per port and a gang collapse into one card.
+    links: Vec<Link>,
 }
 
 impl World {
@@ -209,6 +223,80 @@ impl World {
         self.lights.values().filter(|l| l.online()).count()
     }
 
+    /// The gang a lamp belongs to, if any.
+    pub fn link_of(&self, id: &str) -> Option<&Link> {
+        self.links.iter().find(|link| link.contains(id))
+    }
+
+    pub fn links(&self) -> impl Iterator<Item = &Link> {
+        self.links.iter()
+    }
+
+    /// Gang these lamps, learning the brightness differences they have now.
+    ///
+    /// Any lamp already in a gang leaves it first — a lamp is in at most one,
+    /// which is what lets the panel draw one wire per port. Returns the members
+    /// actually ganged.
+    pub fn link(&mut self, members: &[LightId]) -> Vec<LightId> {
+        let present: Vec<LightId> =
+            members.iter().filter(|id| self.lights.contains_key(*id)).cloned().collect();
+        if present.len() < 2 {
+            return Vec::new();
+        }
+
+        for id in &present {
+            self.unlink(id);
+        }
+
+        let states: BTreeMap<String, LightState> = present
+            .iter()
+            .filter_map(|id| Some((id.clone(), self.lights.get(id)?.desired)))
+            .collect();
+        self.links.push(Link::learn(&states));
+        present
+    }
+
+    /// Take a lamp out of its gang, returning the members that were in it.
+    ///
+    /// A gang of one is not a gang, so the remainder is dissolved too.
+    pub fn unlink(&mut self, id: &str) -> Vec<LightId> {
+        let Some(index) = self.links.iter().position(|link| link.contains(id)) else {
+            return Vec::new();
+        };
+        let mut link = self.links.remove(index);
+        let mut affected: Vec<LightId> = link.members().cloned().collect();
+
+        link.remove(id);
+        if link.len() >= 2 {
+            self.links.push(link);
+            affected.retain(|m| m == id || self.link_of(m).is_some());
+        }
+        affected
+    }
+
+    /// Replace a gang's stored links wholesale, for restoring from config.
+    pub fn set_links(&mut self, links: Vec<Link>) {
+        self.links = links;
+    }
+
+    /// Teach a lamp's gang a new difference after it moved on its own.
+    ///
+    /// This is alt-drag: the lamp keeps the value it was just given and the
+    /// gang adopts the new spacing, rather than dragging the lamp back.
+    pub fn relearn(&mut self, id: &str, brightness: u8) -> bool {
+        let others: BTreeMap<String, LightState> = self
+            .lights
+            .iter()
+            .filter(|(other, _)| other.as_str() != id)
+            .map(|(other, light)| (other.clone(), light.desired))
+            .collect();
+
+        self.links
+            .iter_mut()
+            .find(|link| link.contains(id))
+            .is_some_and(|link| link.relearn(id, brightness, &others))
+    }
+
     /// Apply a patch, returning the lights that now owe a push and what each
     /// one's clients would see change.
     ///
@@ -218,43 +306,84 @@ impl World {
     /// light is on and one is off, and it keeps the `all` selector consistent
     /// with the `/lights/all` D-Bus object. A named selector instead resolves
     /// per light, so `gaffer set left +10%` is relative to *that* light.
+    ///
+    /// Gangs are then expanded over the result: touching any member moves the
+    /// whole instrument. Propagation happens here, once, inside a single apply
+    /// — it never re-enters, so a symmetric link cannot chase itself.
     pub fn apply(&mut self, target: &Target, patch: &StatePatch) -> Vec<(LightId, Changed)> {
         let now = Instant::now();
+        let intended = self.intended(target, patch);
+        let expanded = self.expand_through_links(intended);
 
+        expanded
+            .into_iter()
+            .filter_map(|(id, next)| {
+                let light = self.lights.get_mut(&id)?;
+                Some((id, light.set_desired(next, now)?))
+            })
+            .collect()
+    }
+
+    /// What the command asks for, before gangs are considered.
+    fn intended(&self, target: &Target, patch: &StatePatch) -> BTreeMap<LightId, LightState> {
         match target {
-            Target::Id(id) => {
-                let Some(light) = self.lights.get_mut(id) else {
-                    return Vec::new();
-                };
-                let next = patch.apply(light.desired);
-                light
-                    .set_desired(next, now)
-                    .map(|changed| vec![(light.id.clone(), changed)])
-                    .unwrap_or_default()
-            }
+            Target::Id(id) => self
+                .lights
+                .get(id)
+                .map(|light| (id.clone(), patch.apply(light.desired)))
+                .into_iter()
+                .collect(),
             Target::Select(Selector::All) => {
                 let Some(base) = self.group_state() else {
-                    return Vec::new();
+                    return BTreeMap::new();
                 };
                 let absolute = as_absolute(patch.apply(base));
                 self.lights
-                    .values_mut()
-                    .filter_map(|light| {
-                        let next = absolute.apply(light.desired);
-                        Some((light.id.clone(), light.set_desired(next, now)?))
-                    })
+                    .values()
+                    .map(|light| (light.id.clone(), absolute.apply(light.desired)))
                     .collect()
             }
             Target::Select(selector) => self
                 .lights
-                .values_mut()
+                .values()
                 .filter(|light| selector.matches(&light.id, &light.name))
-                .filter_map(|light| {
-                    let next = patch.apply(light.desired);
-                    Some((light.id.clone(), light.set_desired(next, now)?))
-                })
+                .map(|light| (light.id.clone(), patch.apply(light.desired)))
                 .collect(),
         }
+    }
+
+    /// Widen a set of intended states so every gang moves as one instrument.
+    ///
+    /// When a command touches several members of one gang — `all` does — the
+    /// lowest-id member acts as the mover, so the outcome is deterministic
+    /// rather than depending on iteration order.
+    fn expand_through_links(
+        &self,
+        intended: BTreeMap<LightId, LightState>,
+    ) -> BTreeMap<LightId, LightState> {
+        let mut out = intended.clone();
+
+        for link in &self.links {
+            let Some(mover) = link.members().find(|member| intended.contains_key(*member)) else {
+                continue;
+            };
+            for (id, state) in link.resolve(mover, intended[mover]) {
+                if self.lights.contains_key(&id) {
+                    out.insert(id, state);
+                }
+            }
+        }
+
+        out
+    }
+}
+
+/// Turn a resolved state into a patch that sets every field absolutely.
+fn as_absolute(state: LightState) -> StatePatch {
+    StatePatch {
+        power: Some(if state.on { Power::On } else { Power::Off }),
+        brightness: Some(Adjust::Set(i32::from(state.brightness))),
+        kelvin: Some(Adjust::Set(i32::from(state.kelvin))),
     }
 }
 
@@ -294,15 +423,6 @@ impl GroupSnapshot {
             kelvin: b.kelvin != a.kelvin,
             error: false,
         }
-    }
-}
-
-/// Turn a resolved state into a patch that sets every field absolutely.
-fn as_absolute(state: LightState) -> StatePatch {
-    StatePatch {
-        power: Some(if state.on { Power::On } else { Power::Off }),
-        brightness: Some(Adjust::Set(i32::from(state.brightness))),
-        kelvin: Some(Adjust::Set(i32::from(state.kelvin))),
     }
 }
 
@@ -528,5 +648,140 @@ mod tests {
         let appeared =
             GroupSnapshot::diff(snapshot(None, 0, 0), snapshot(Some(LightState::default()), 1, 1));
         assert!(appeared.online);
+    }
+
+    #[test]
+    fn ganging_learns_the_current_difference() {
+        let mut world = world(); // a=40%, b=60%
+        assert_eq!(world.link(&["a".into(), "b".into()]).len(), 2);
+
+        let link = world.link_of("a").expect("a should be ganged");
+        assert_eq!(link.offset_of("a"), Some(0));
+        assert_eq!(link.offset_of("b"), Some(20));
+    }
+
+    #[test]
+    fn moving_either_member_moves_the_whole_gang() {
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]);
+
+        let patch = StatePatch { brightness: Some(Adjust::Set(50)), ..StatePatch::EMPTY };
+        let touched = world.apply(&Target::Id("a".into()), &patch);
+
+        assert_eq!(ids(&touched), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(world.get("a").unwrap().desired.brightness, 50);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 70, "offset +20 preserved");
+    }
+
+    #[test]
+    fn power_gangs_so_the_pair_is_one_instrument() {
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]);
+
+        world.apply(&Target::Id("a".into()), &StatePatch::power(Power::Off));
+        assert!(!world.get("a").unwrap().desired.on);
+        assert!(!world.get("b").unwrap().desired.on, "turning the gang off turns both off");
+    }
+
+    #[test]
+    fn temperature_mirrors_across_the_gang() {
+        let mut world = world(); // a=4000K, b=5000K
+        world.link(&["a".into(), "b".into()]);
+
+        let patch = StatePatch { kelvin: Some(Adjust::Set(4200)), ..StatePatch::EMPTY };
+        world.apply(&Target::Id("a".into()), &patch);
+
+        assert_eq!(world.get("a").unwrap().desired.kelvin, 4200);
+        assert_eq!(
+            world.get("b").unwrap().desired.kelvin,
+            4200,
+            "temperature mirrors, never offsets"
+        );
+    }
+
+    #[test]
+    fn applying_the_resolved_state_again_changes_nothing() {
+        // The oscillation guard at world level: a gang that has settled must
+        // not keep generating work when the same command arrives twice.
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]);
+        let patch = StatePatch { brightness: Some(Adjust::Set(50)), ..StatePatch::EMPTY };
+
+        world.apply(&Target::Id("a".into()), &patch);
+        for id in ["a", "b"] {
+            let light = world.get_mut(id).unwrap();
+            light.reported = Some(light.desired);
+            light.dirty_since = None;
+        }
+
+        assert!(world.apply(&Target::Id("a".into()), &patch).is_empty());
+        assert!(world.apply(&Target::Id("b".into()), &StatePatch::EMPTY).is_empty());
+    }
+
+    #[test]
+    fn a_lamp_belongs_to_at_most_one_gang() {
+        let mut world = world();
+        world.insert(record(
+            "c",
+            "Mini",
+            LightState { on: true, brightness: 10, kelvin: 4000 },
+            true,
+        ));
+
+        world.link(&["a".into(), "b".into()]);
+        world.link(&["b".into(), "c".into()]);
+
+        assert!(world.link_of("a").is_none(), "a's gang dissolved when b left it");
+        assert!(world.link_of("b").is_some());
+        assert!(world.link_of("c").is_some());
+        assert_eq!(world.links().count(), 1);
+    }
+
+    #[test]
+    fn unlinking_dissolves_a_pair_entirely() {
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]);
+
+        let affected = world.unlink("a");
+        assert_eq!(affected.len(), 2, "both lamps are affected when a pair breaks");
+        assert!(world.link_of("a").is_none());
+        assert!(world.link_of("b").is_none(), "a gang of one is not a gang");
+    }
+
+    #[test]
+    fn ganging_needs_at_least_two_present_lamps() {
+        let mut world = world();
+        assert!(world.link(&["a".into()]).is_empty());
+        assert!(world.link(&["a".into(), "nonexistent".into()]).is_empty());
+        assert!(world.link_of("a").is_none());
+    }
+
+    #[test]
+    fn alt_drag_relearns_the_spacing() {
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]); // offset +20
+
+        // b is dragged alone to 45 while a stays at 40.
+        world.get_mut("b").unwrap().desired.brightness = 45;
+        assert!(world.relearn("b", 45));
+        assert_eq!(world.link_of("b").unwrap().offset_of("b"), Some(5));
+
+        let patch = StatePatch { brightness: Some(Adjust::Set(60)), ..StatePatch::EMPTY };
+        world.apply(&Target::Id("a".into()), &patch);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 65);
+    }
+
+    #[test]
+    fn all_still_addresses_every_lamp_with_a_gang_present() {
+        // `all` touches both members, so the lowest id acts as the mover and
+        // the gang keeps its shape rather than being flattened.
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]); // offset +20
+
+        let patch = StatePatch { brightness: Some(Adjust::Set(50)), ..StatePatch::EMPTY };
+        world.apply(&Target::Select(Selector::All), &patch);
+
+        assert_eq!(world.get("a").unwrap().desired.brightness, 50);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 70);
     }
 }

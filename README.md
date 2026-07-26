@@ -110,6 +110,25 @@ gaffer list --json           # for scripts
 `set` changes exactly what you name — it never implicitly powers a light on.
 Use `on` when you mean on.
 
+### Ganging lights
+
+```sh
+gaffer link left right    # they now move as one instrument
+gaffer set left +10%      # both rise, keeping their difference
+gaffer unlink left        # break the gang
+```
+
+`link` learns the brightness difference the lamps have *now*, so a key/fill
+ratio survives — set your fill 7 points below the key and it stays 7 points
+below wherever you take the pair. Moving *either* lamp moves both. Colour
+temperature and power mirror; only brightness carries the offset. A pair that
+already matches learns an offset of zero, which behaves exactly like a mirror,
+so the friendly default is also the non-destructive one.
+
+Gangs live in the daemon, so a compositor hotkey moves the pair with no panel
+running, and they survive a restart — they are stored in
+`~/.config/gaffer/config.toml`, which is meant to be readable.
+
 ### Hyprland
 
 ```conf

@@ -7,6 +7,7 @@
 //! Started on demand via D-Bus activation, which defers to systemd so the
 //! process gets a proper cgroup, journal and restart policy. See `data/`.
 
+mod config;
 mod dbus;
 mod discovery;
 mod elgato;
@@ -72,7 +73,17 @@ async fn main() -> Result<()> {
     init_tracing();
     info!(version = env!("CARGO_PKG_VERSION"), "gafferd starting");
 
-    let world = Arc::new(RwLock::new(World::default()));
+    // Gangs are user intent and outlive a restart; everything else about a
+    // light is re-discovered.
+    let mut initial = World::default();
+    if let Some(path) = config::Config::path() {
+        let links = config::Config::load(&path).links();
+        if !links.is_empty() {
+            info!(count = links.len(), path = %path.display(), "restored gangs");
+        }
+        initial.set_links(links);
+    }
+    let world = Arc::new(RwLock::new(initial));
     let (requests_tx, requests_rx) = mpsc::channel(64);
     let (discoveries_tx, discoveries_rx) = mpsc::channel(64);
 

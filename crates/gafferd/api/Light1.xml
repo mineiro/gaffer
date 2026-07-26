@@ -2,6 +2,9 @@
 <method name="Apply">
 <arg name="tokens" type="as" direction="in"/>
 </method>
+<method name="SetBrightnessAlone">
+<arg name="value" type="y" direction="in"/>
+</method>
 <method name="Identify">
 </method>
 <method name="Refresh">

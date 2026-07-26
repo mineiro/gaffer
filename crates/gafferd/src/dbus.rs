@@ -57,6 +57,8 @@ pub enum Request {
     Rescan,
     /// Physically blink these lights.
     Identify(Vec<LightId>),
+    /// Gangs changed: persist them and announce the affected lights.
+    LinksChanged(Vec<LightId>),
 }
 
 /// Object path for a light, derived from its hardware id.
@@ -255,6 +257,40 @@ impl Light1 {
         self.mutate(patch).await
     }
 
+    /// Set this light's brightness *without* dragging its gang, and teach the
+    /// gang the new difference.
+    ///
+    /// This is alt-drag. An ordinary brightness write moves the whole
+    /// instrument; this one moves a single lamp and re-learns the spacing, so
+    /// the ratio the user just dialled in becomes the one the gang keeps.
+    async fn set_brightness_alone(&self, value: u8) -> fdo::Result<()> {
+        let View::One(id) = &self.view else {
+            return Err(fdo::Error::InvalidArgs(
+                "the group has no gang of its own to re-learn".into(),
+            ));
+        };
+
+        let applied = {
+            let mut world = self.world.write().await;
+            let group_before = GroupSnapshot::of(&world);
+
+            let changes = match world.get_mut(id) {
+                Some(light) => {
+                    let next = LightState { brightness: value, ..light.desired };
+                    light.set_desired_alone(next).map(|c| vec![(id.clone(), c)]).unwrap_or_default()
+                }
+                None => Vec::new(),
+            };
+            world.relearn(id, value);
+
+            let group_after = GroupSnapshot::of(&world);
+            Request::Applied { changes, group_before, group_after }
+        };
+
+        announce(&self.requests, applied).await?;
+        send(&self.requests, Request::LinksChanged(vec![id.clone()])).await
+    }
+
     /// Physically blink the light.
     async fn identify(&self) -> fdo::Result<()> {
         let ids = {
@@ -318,6 +354,72 @@ impl Manager1 {
     /// Re-probe the network and re-read every light.
     async fn rescan(&self) -> fdo::Result<()> {
         send(&self.requests, Request::Rescan).await
+    }
+
+    /// Gang the lights a selector matches, learning their current differences.
+    ///
+    /// Offset is the only way in, deliberately: a pair that already matches
+    /// learns an offset of zero and behaves exactly like a mirror, so the
+    /// friendly default is also the non-destructive one. `Mirror` is a separate,
+    /// explicit act because it overwrites one lamp's values with another's.
+    async fn link(&self, selectors: Vec<String>) -> fdo::Result<Vec<String>> {
+        let members = {
+            let mut world = self.world.write().await;
+            // Union of every selector, so `link left right` and `link key`
+            // both work. Deduplicated because two selectors may overlap.
+            let mut matched: Vec<String> = selectors
+                .iter()
+                .flat_map(|selector| world.select(&Selector::parse(selector)))
+                .collect();
+            matched.sort();
+            matched.dedup();
+            world.link(&matched)
+        };
+
+        if members.len() < 2 {
+            return Err(fdo::Error::InvalidArgs(format!(
+                "{:?} matched {} light(s); a gang needs at least two",
+                selectors,
+                members.len()
+            )));
+        }
+
+        send(&self.requests, Request::LinksChanged(members.clone())).await?;
+        Ok(members)
+    }
+
+    /// Break the gang a light belongs to. Returns every light affected.
+    async fn unlink(&self, selector: String) -> fdo::Result<Vec<String>> {
+        let affected = {
+            let mut world = self.world.write().await;
+            let matched = world.select(&Selector::parse(&selector));
+            let mut affected: Vec<String> = Vec::new();
+            for id in matched {
+                affected.extend(world.unlink(&id));
+            }
+            affected.sort();
+            affected.dedup();
+            affected
+        };
+
+        send(&self.requests, Request::LinksChanged(affected.clone())).await?;
+        Ok(affected)
+    }
+
+    /// The gangs, as member-id lists with each member's brightness offset.
+    ///
+    /// Shaped for a panel drawing wires: `(mode, [(id, offset)])`.
+    #[zbus(property)]
+    async fn links(&self) -> Vec<(String, Vec<(String, i32)>)> {
+        self.world
+            .read()
+            .await
+            .links()
+            .map(|link| {
+                let members = link.offsets().map(|(id, o)| (id.clone(), o)).collect();
+                (link.mode.as_str().to_string(), members)
+            })
+            .collect()
     }
 
     #[zbus(property)]

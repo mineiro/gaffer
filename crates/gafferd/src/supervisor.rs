@@ -19,6 +19,7 @@ use tokio::sync::{RwLock, mpsc};
 use tokio::time::sleep_until;
 use tracing::{debug, info, warn};
 
+use crate::config::Config;
 use crate::dbus::{Publisher, Request};
 use crate::discovery::{Discovered, Discovery, DiscoveryEvent};
 use crate::elgato::{self, AccessoryInfo, PartialState};
@@ -126,6 +127,18 @@ impl Supervisor {
                     self.publisher.notify_light(&id, changed).await;
                 }
                 self.emit_group_diff(group_before, group_after).await;
+            }
+            Request::LinksChanged(affected) => {
+                self.save_links().await;
+                // A gang's shape is not a light property, so nothing is emitted
+                // per lamp; clients watch Manager1.Links. The affected lamps
+                // still get a nudge because ganging can move them.
+                for id in affected {
+                    self.publisher
+                        .notify_light(&id, Changed { meta: true, ..Changed::default() })
+                        .await;
+                }
+                self.publisher.notify_manager().await;
             }
             Request::RefreshAll => self.refresh_all().await,
             Request::Rescan => {
@@ -369,6 +382,24 @@ impl Supervisor {
                     let _ = io.send(Io::Info { id: light_id, info: Box::new(info) }).await;
                 }
             });
+        }
+    }
+
+    /// Persist the gangs. Failure is logged, never fatal: losing a link across
+    /// a restart is a nuisance, refusing to run is worse.
+    async fn save_links(&self) {
+        let Some(path) = Config::path() else {
+            warn!("no config directory; gangs will not survive a restart");
+            return;
+        };
+
+        let mut config = Config::load(&path);
+        {
+            let world = self.world.read().await;
+            config.set_links(world.links());
+        }
+        if let Err(error) = config.save(&path) {
+            warn!(path = %path.display(), error = %format!("{error:#}"), "could not save gangs");
         }
     }
 

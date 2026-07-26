@@ -34,6 +34,16 @@ pub trait Manager {
     /// Re-probe the network and re-read every light.
     fn rescan(&self) -> zbus::Result<()>;
 
+    /// Gang the lights a selector matches, learning their current differences.
+    fn link(&self, selectors: Vec<String>) -> zbus::Result<Vec<String>>;
+
+    /// Break the gang a light belongs to; returns every light affected.
+    fn unlink(&self, selector: &str) -> zbus::Result<Vec<String>>;
+
+    /// Gangs as `(mode, [(light id, brightness offset)])`.
+    #[zbus(property)]
+    fn links(&self) -> zbus::Result<Vec<(String, Vec<(String, i32)>)>>;
+
     #[zbus(property)]
     fn version(&self) -> zbus::Result<String>;
 }

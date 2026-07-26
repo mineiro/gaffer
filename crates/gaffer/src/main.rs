@@ -71,6 +71,14 @@ enum Command {
     },
     /// Make the hardware blink so you can tell which light is which.
     Identify { selector: Option<String> },
+    /// Gang lights so they move as one instrument, keeping their current
+    /// brightness difference.
+    Link {
+        #[arg(required = true, num_args = 1..)]
+        selectors: Vec<String>,
+    },
+    /// Break the gang a light belongs to.
+    Unlink { selector: Option<String> },
     /// Re-probe the network now.
     Rescan,
     /// Stream state changes until interrupted.
@@ -105,6 +113,26 @@ async fn main() -> Result<()> {
             if matched.is_empty() {
                 bail!("no light matches `{selector}`");
             }
+        }
+        Command::Link { selectors } => {
+            let manager = ManagerProxy::new(&connection).await?;
+            // Several selectors gang what they collectively match, so both
+            // `gaffer link left right` and `gaffer link key` read naturally.
+            let members = manager
+                .link(selectors)
+                .await
+                .map_err(user_facing)
+                .context("asking the daemon to gang lights")?;
+            println!("ganged {} lights: {}", members.len(), members.join(", "));
+        }
+        Command::Unlink { selector } => {
+            let manager = ManagerProxy::new(&connection).await?;
+            let selector = selector.unwrap_or_else(|| "all".into());
+            let affected = manager.unlink(&selector).await.map_err(user_facing)?;
+            if affected.is_empty() {
+                bail!("`{selector}` matched no ganged light");
+            }
+            println!("unganged {} lights", affected.len());
         }
         Command::Rescan => {
             let manager = ManagerProxy::new(&connection).await?;
