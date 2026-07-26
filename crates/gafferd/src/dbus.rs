@@ -523,15 +523,15 @@ mod tests {
         out
     }
 
+    // Introspection reads no state and sends no requests, so an empty world and
+    // a dangling sender are all these need.
     fn light_iface() -> Light1 {
-        let (tx, rx) = mpsc::channel(1);
-        std::mem::forget(rx); // keep the channel open for the lifetime of the test
+        let (tx, _) = mpsc::channel(1);
         Light1::new(Arc::new(RwLock::new(World::default())), View::Group, tx)
     }
 
     fn manager_iface() -> Manager1 {
-        let (tx, rx) = mpsc::channel(1);
-        std::mem::forget(rx);
+        let (tx, _) = mpsc::channel(1);
         Manager1 { world: Arc::new(RwLock::new(World::default())), requests: tx }
     }
 
