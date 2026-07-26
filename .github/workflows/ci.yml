@@ -1,0 +1,93 @@
+name: CI
+
+# `pull_request`, never `pull_request_target`. The latter runs in the context of
+# the *base* repository — with a writable token and access to secrets — while
+# checking out the contributor's code. That combination is how several projects
+# have had their credentials exfiltrated by a first-time contributor's PR. With
+# `pull_request`, a fork's run gets a read-only token and no secrets at all.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Deny by default; each job opts in to the minimum it needs. A stolen token that
+# grants nothing is not worth stealing.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: fmt, clippy, test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Pinned to an immutable commit, not a tag: tags are mutable, and moving
+      # one is exactly how the tj-actions/changed-files compromise reached
+      # thousands of repositories at once. Dependabot keeps the pin current.
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          # Do not leave the job token in .git/config. `cargo` executes build.rs
+          # from every dependency in the tree, so a single compromised crate
+          # could otherwise read the token straight out of the checkout.
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      # --locked fails rather than silently resolving a different dependency
+      # tree than the committed Cargo.lock, which is also what distro packaging
+      # builds from.
+      - name: Lint
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+  msrv:
+    name: MSRV 1.88
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          persist-credentials: false
+
+      # Proves the rust-version in Cargo.toml is the real floor. Let-chains put
+      # it at 1.88; without this job the declaration is only a claim.
+      - name: Install the declared minimum toolchain
+        run: rustup toolchain install 1.88 --profile minimal
+
+      - name: Build
+        run: cargo +1.88 build --workspace --locked
+
+  packaging:
+    name: spec lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install rpmlint
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpmlint
+
+      # Catches spec syntax and SPDX mistakes here rather than in a COPR build.
+      - name: Lint the RPM spec
+        run: rpmlint gaffer.spec
