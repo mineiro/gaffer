@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use gaffer_core::{LightState, Selector, StatePatch, parse_patch};
 use tokio::sync::{RwLock, mpsc};
-use tracing::debug;
+use tracing::{debug, warn};
 use zbus::object_server::SignalEmitter;
 use zbus::{Connection, fdo, interface};
 
@@ -412,7 +412,17 @@ impl Publisher {
     pub async fn add_light(&self, id: &LightId) -> zbus::Result<()> {
         let light = Light1::new(self.world.clone(), View::One(id.clone()), self.requests.clone());
         let path = light_path(id);
-        self.connection.object_server().at(path.as_str(), light).await?;
+
+        // `at` reports an already-occupied path by returning Ok(false), not an
+        // error. Discarding that would let one light silently shadow another
+        // and log success while doing it — so treat it as the failure it is.
+        // Ids are canonicalised at discovery, which should make this
+        // unreachable; if it ever fires, the canonical form has a collision.
+        if !self.connection.object_server().at(path.as_str(), light).await? {
+            warn!(%id, %path, "object path already taken; light not published");
+            return Err(zbus::Error::Failure(format!("object path {path} already in use")));
+        }
+
         debug!(%id, %path, "published light on the bus");
         Ok(())
     }

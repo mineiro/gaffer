@@ -299,6 +299,24 @@ The daemon contains no `unsafe`, and no `unwrap`/`expect`/`panic` outside tests:
 a panic in a session service is a denial of service, so keep it that way. No TLS
 stack is linked in, because the devices speak plain HTTP on the LAN.
 
+**`crates/gafferd/src/discovery.rs` `resolve()` is the trust boundary.** Every
+string arriving from mDNS or from a device's HTTP response is canonicalised or
+sanitised there and in the `Io::Info` handler — never later, and never in a
+renderer. Three invariants depend on it:
+
+- `Endpoint` holds a parsed `IpAddr`, never a hostname. Do not reintroduce a
+  hostname fallback: mDNS does not validate name characters, and a target such
+  as `127.0.0.1:11434/api/pull#` injects a path into the request URL. Checking
+  for a `.local.` suffix does *not* fix it — `#` and `?` end the authority
+  first.
+- Device text goes through `gaffer_core::sanitize` before it is stored, so no
+  sink can receive a control character.
+- Ids go through `gaffer_core::normalize_id`, which keeps punctuation variants
+  of one MAC as one record and guarantees a valid, non-empty object path.
+
+`elgato::client()` sets `Policy::none()`; a redirect-following client hands a
+hostile device the same path control by another route.
+
 ## Commit & Pull Request Guidelines
 
 Imperative subjects with a crate scope: `core:`, `daemon:`, `cli:`, `data:`,

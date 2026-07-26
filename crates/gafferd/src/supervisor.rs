@@ -158,7 +158,7 @@ impl Supervisor {
     }
 
     async fn on_found(&mut self, found: Discovered) {
-        let endpoint = Endpoint { host: found.host, addr: found.addr, port: found.port };
+        let endpoint = Endpoint { addr: found.addr, port: found.port };
 
         let is_new = {
             let world = self.world.read().await;
@@ -252,9 +252,10 @@ impl Supervisor {
                     let was_online =
                         self.world.read().await.get(&id).is_some_and(LightRecord::online);
 
+                    let message = gaffer_core::sanitize(&error);
                     self.update(&id, |light| {
                         light.reported = None; // no report *is* offline
-                        light.last_error = error.clone();
+                        light.last_error = message.clone();
                     })
                     .await;
 
@@ -275,14 +276,23 @@ impl Supervisor {
                 }
             },
             Io::Info { id, info } => {
+                // Sanitised here rather than in any renderer: these strings come
+                // from a device that anyone on the link can impersonate, and
+                // they reach a terminal, a status bar, the journal and every
+                // D-Bus client. One filter at the point of entry covers all of
+                // them, including sinks that do not exist yet.
+                let name = gaffer_core::sanitize(&info.display_name);
+                let model = gaffer_core::sanitize(&info.product_name);
+                let firmware = gaffer_core::sanitize(&info.firmware_version);
+
                 self.update(&id, |light| {
-                    if !info.display_name.is_empty() {
-                        light.name = info.display_name.clone();
+                    if !name.is_empty() {
+                        light.name = name.clone();
                     }
-                    if !info.product_name.is_empty() {
-                        light.model = info.product_name.clone();
+                    if !model.is_empty() {
+                        light.model = model.clone();
                     }
-                    light.firmware = info.firmware_version.clone();
+                    light.firmware = firmware.clone();
                 })
                 .await;
             }

@@ -111,6 +111,11 @@ pub fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .user_agent(concat!("gafferd/", env!("CARGO_PKG_VERSION")))
+        // A Key Light never redirects, and reqwest otherwise follows up to ten.
+        // A hostile device answering with `Location:` could redirect the daemon
+        // to any path on any host — including a loopback service the attacker
+        // cannot reach — and 307/308 would replay the PUT and its body there.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .context("building the HTTP client")
 }

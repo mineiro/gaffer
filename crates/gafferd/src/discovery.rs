@@ -12,11 +12,11 @@
 //! would make the same physical light appear as a second device.
 
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use mdns_sd::{ServiceDaemon, ServiceEvent};
+use mdns_sd::{ScopedIp, ServiceDaemon, ServiceEvent};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
@@ -30,9 +30,13 @@ pub const DEFAULT_PORT: u16 = 9123;
 const VERIFY_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// A light seen on the network.
+///
+/// Every string here has already been canonicalised or sanitised: an mDNS
+/// record is attacker-controlled, and this is the boundary where that stops
+/// being true.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Discovered {
-    /// Hardware id from the TXT `id=` field.
+    /// Canonical hardware id, from the TXT `id=` field.
     pub id: String,
     /// mDNS instance fullname, for re-probing.
     pub fullname: String,
@@ -41,8 +45,7 @@ pub struct Discovered {
     pub name: String,
     /// Model from the TXT `md=` field.
     pub model: String,
-    pub host: String,
-    pub addr: Option<Ipv4Addr>,
+    pub addr: IpAddr,
     pub port: u16,
 }
 
@@ -156,24 +159,33 @@ impl Discovery {
 /// Turn a resolved mDNS service into a [`Discovered`], or `None` if it lacks
 /// what we need to talk to it.
 fn resolve(service: &mdns_sd::ResolvedService) -> Option<Discovered> {
-    let id = service.get_property_val_str("id").unwrap_or_default().trim().to_string();
-    if id.is_empty() {
-        // Without a stable id we cannot tell this light apart from a rename of
-        // another one, so refuse rather than inventing an identity.
-        return None;
-    }
+    // Canonicalise rather than trust: devices punctuate MACs inconsistently,
+    // and two spellings of one id would otherwise become two records that
+    // collide on a single D-Bus object path. Also rejects an id with no usable
+    // characters, which would produce the invalid path `…/lights/`.
+    let id = gaffer_core::normalize_id(service.get_property_val_str("id").unwrap_or_default())?;
 
-    // Prefer IPv4: the HTTP API is plain and v4 avoids link-local scope-id
-    // handling for no benefit on a LAN.
-    let addr = service.get_addresses_v4().into_iter().min();
+    // A resolved address is required; the SRV target name is never used to
+    // build a URL. mDNS does not validate the characters in a received name,
+    // so formatting one into a URL let a crafted advertisement inject an
+    // arbitrary path — see the note on `Endpoint`. Prefer IPv4, and accept
+    // IPv6 only when that is all the device offers.
+    let addr = service
+        .get_addresses_v4()
+        .into_iter()
+        .min()
+        .map(IpAddr::from)
+        .or_else(|| service.get_addresses().iter().map(ScopedIp::to_ip_addr).min())?;
+
     let port = if service.port == 0 { DEFAULT_PORT } else { service.port };
 
     Some(Discovered {
         id,
         fullname: service.fullname.clone(),
-        name: instance_name(&service.fullname),
-        model: service.get_property_val_str("md").unwrap_or_default().to_string(),
-        host: service.host.clone(),
+        // Sanitised: an instance label carries raw bytes off the wire, so this
+        // is where a control character stops being able to reach a terminal.
+        name: gaffer_core::sanitize(&instance_name(&service.fullname)),
+        model: gaffer_core::sanitize(service.get_property_val_str("md").unwrap_or_default()),
         addr,
         port,
     })

@@ -36,6 +36,31 @@ does not restrict discovered addresses to private ranges, because doing so would
 break legitimate setups (a light reachable over a VPN, for instance) for no real
 gain.
 
+What is *not* accepted, and is enforced, is anything beyond that: the request
+must remain an Elgato-protocol request to the advertised endpoint. Two
+mechanisms hold that line, both of which were once broken and are now covered by
+tests:
+
+- Endpoints are built from a **parsed IP address and a port**, never from a
+  hostname. mDNS does not validate characters in a received name, so formatting
+  an SRV target into a URL allowed an advertisement to inject an arbitrary path
+  — reaching, for instance, a loopback API the attacker could not otherwise
+  touch. An `IpAddr` cannot express a path, a query or userinfo.
+- The HTTP client **does not follow redirects**. Otherwise a hostile device
+  could answer with `Location:` and achieve the same thing by a second route,
+  replaying the `PUT` body on a 307/308.
+
+**Device-supplied text is sanitised at the daemon.** Names, models and firmware
+strings are attacker-controlled and reach terminals, status bars, the journal
+and every D-Bus client. Control characters are stripped on entry, so a device
+cannot paint ANSI escapes onto the terminal of anyone running `gaffer list`, and
+cannot emit a NUL that would make the daemon's own D-Bus messages malformed.
+
+**Device ids are canonicalised on entry.** Ids are hardware MACs, punctuated
+inconsistently; two spellings of one id would otherwise become two records
+colliding on a single D-Bus object path, which allowed a crafted announcement
+plus a goodbye to unregister a *genuine* light permanently.
+
 **Light traffic is unencrypted.** The Key Light HTTP API offers no TLS and no
 authentication. Anyone on the LAN can read and change light state regardless of
 gaffer. No TLS stack is linked into the binaries at all.

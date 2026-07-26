@@ -12,7 +12,7 @@
 //! normal; them never converging is how a vanished light is noticed.
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 use std::time::Instant;
 
 use gaffer_core::{Adjust, LightState, Power, Selector, StatePatch, group};
@@ -21,21 +21,37 @@ use gaffer_core::{Adjust, LightState, Power, Selector, StatePatch, group};
 pub type LightId = String;
 
 /// Where a light's HTTP API lives.
+///
+/// Deliberately holds a parsed [`IpAddr`] and never a hostname. An earlier
+/// version fell back to formatting the mDNS SRV target into the URL when no
+/// address had resolved, and that was exploitable: mDNS never validates the
+/// characters in a received name, so an advertisement with the target
+/// `127.0.0.1:11434/api/pull#` produced
+/// `http://127.0.0.1:11434/api/pull#:9123/elgato/lights`, which parses as host
+/// `127.0.0.1`, port `11434`, path `/api/pull`. One multicast packet could
+/// therefore aim the daemon's requests at an arbitrary path on a loopback
+/// service the attacker could not otherwise reach.
+///
+/// An `IpAddr` cannot express a path, a query or a userinfo section, so the
+/// whole class is gone rather than filtered — which matters, because the
+/// obvious filter (requiring a `.local.` suffix) does not work: `#` and `?`
+/// terminate the authority before any suffix is examined.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Endpoint {
-    pub host: String,
-    pub addr: Option<Ipv4Addr>,
+    pub addr: IpAddr,
     pub port: u16,
 }
 
 impl Endpoint {
-    /// Prefer the resolved address over the `.local` hostname: resolving the
-    /// latter needs a working mDNS NSS module, which is exactly what is missing
-    /// on the machines where this would otherwise mysteriously fail.
+    /// Base URL for this light's HTTP API.
+    ///
+    /// Every component is structurally constrained: a parsed address and a
+    /// `u16`. Nothing here originates as an untrusted string.
     pub fn base_url(&self) -> String {
         match self.addr {
-            Some(addr) => format!("http://{addr}:{}", self.port),
-            None => format!("http://{}:{}", self.host.trim_end_matches('.'), self.port),
+            // IPv6 literals need brackets, or the colons read as a port.
+            IpAddr::V6(addr) => format!("http://[{addr}]:{}", self.port),
+            IpAddr::V4(addr) => format!("http://{addr}:{}", self.port),
         }
     }
 }
@@ -301,7 +317,7 @@ mod tests {
             name: name.to_string(),
             model: "Elgato Key Light MK.2".to_string(),
             firmware: String::new(),
-            endpoint: Endpoint { host: "x.local.".into(), addr: None, port: 9123 },
+            endpoint: Endpoint { addr: IpAddr::from([192, 0, 2, 10]), port: 9123 },
             desired: state,
             reported: online.then_some(state),
             last_error: String::new(),
@@ -331,16 +347,29 @@ mod tests {
     }
 
     #[test]
-    fn base_url_prefers_the_resolved_address() {
-        let with_addr = Endpoint {
-            host: "elgato-key-light-left.local.".into(),
-            addr: Some(Ipv4Addr::new(192, 0, 2, 10)),
-            port: 9123,
-        };
-        assert_eq!(with_addr.base_url(), "http://192.0.2.10:9123");
+    fn a_base_url_is_built_only_from_an_address_and_a_port() {
+        let v4 = Endpoint { addr: IpAddr::from([192, 0, 2, 10]), port: 9123 };
+        assert_eq!(v4.base_url(), "http://192.0.2.10:9123");
+    }
 
-        let without = Endpoint { addr: None, ..with_addr };
-        assert_eq!(without.base_url(), "http://elgato-key-light-left.local:9123");
+    #[test]
+    fn ipv6_literals_are_bracketed() {
+        // Without brackets the address's own colons would be read as a port.
+        let v6 = Endpoint { addr: "2001:db8::1".parse().unwrap(), port: 9123 };
+        assert_eq!(v6.base_url(), "http://[2001:db8::1]:9123");
+    }
+
+    #[test]
+    fn a_url_cannot_carry_a_path_however_hostile_discovery_was() {
+        // The endpoint holds a parsed address, so there is no string an mDNS
+        // advertisement could supply that adds a path, query or userinfo.
+        for addr in ["127.0.0.1", "::1", "192.0.2.10"] {
+            let url = Endpoint { addr: addr.parse().unwrap(), port: 11434 }.base_url();
+            let after_scheme = url.trim_start_matches("http://");
+            assert!(!after_scheme.contains('/'), "{url} gained a path");
+            assert!(!after_scheme.contains('#') && !after_scheme.contains('?'), "{url}");
+            assert!(!after_scheme.contains('@'), "{url} gained userinfo");
+        }
     }
 
     #[test]
