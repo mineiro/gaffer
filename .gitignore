@@ -16,3 +16,4 @@
 *.rpm
 *.tar.gz
 *.tar.xz
+/result

@@ -27,8 +27,48 @@ use crate::discovery::Discovery;
 use crate::supervisor::Supervisor;
 use crate::world::World;
 
+/// Handle the arguments a daemon is nonetheless expected to answer.
+///
+/// Hand-rolled rather than pulling clap into the daemon: gafferd takes no
+/// options, and the only thing that matters is not silently booting a daemon
+/// when someone types `--help` and waits for output that never comes. An
+/// unknown argument is an error for the same reason — a typo in a unit file
+/// should fail loudly rather than start a daemon that ignores it.
+///
+/// Returns `true` if the caller should exit immediately.
+fn handled_trivial_args() -> bool {
+    // Only the first argument is inspected: gafferd accepts no options, so
+    // anything at all beyond the program name is either a query or a mistake.
+    let Some(arg) = std::env::args().nth(1) else {
+        return false;
+    };
+
+    match arg.as_str() {
+        "--version" | "-V" => println!("gafferd {}", env!("CARGO_PKG_VERSION")),
+        "--help" | "-h" => println!(
+            "gafferd {}\n\n\
+             The gaffer daemon. Owns Elgato Key Light discovery and state, and\n\
+             serves them on the D-Bus session bus as {}.\n\n\
+             Takes no options. Started on demand by D-Bus activation; run\n\
+             `gaffer` to control lights, and set GAFFER_LOG=debug for detail.",
+            env!("CARGO_PKG_VERSION"),
+            dbus::BUS_NAME
+        ),
+        other => {
+            eprintln!("gafferd: unexpected argument `{other}`; try --help");
+            std::process::exit(2);
+        }
+    }
+
+    true
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    if handled_trivial_args() {
+        return Ok(());
+    }
+
     init_tracing();
     info!(version = env!("CARGO_PKG_VERSION"), "gafferd starting");
 

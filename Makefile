@@ -22,7 +22,8 @@ CARGO   ?= cargo
 # forced to re-run cargo with our flags.
 ARTIFACTDIR ?= target/release
 
-.PHONY: all build test check install install-user uninstall uninstall-user clean vendor
+.PHONY: all build test check install install-user uninstall uninstall-user clean vendor \
+	nix-build nix-check nix-shell
 
 all: build
 
@@ -82,6 +83,28 @@ vendor:
 	$(CARGO) vendor --versioned-dirs vendor
 	@echo "vendored. tar it up as Source1 and add .cargo/config.toml to the build."
 
+# Nix, without installing Nix. Runs in a throwaway rootless container with a
+# persistent volume for /nix, so repeat runs do not re-download the world.
+# /dev/kvm is passed through because the NixOS VM test needs it; it is mode 0666
+# on a normal Fedora install, so no group membership is required.
+NIX_IMAGE ?= docker.io/nixos/nix:latest
+NIX_RUN = podman run --rm -it \
+	-v gaffer-nix-store:/nix \
+	-v "$(CURDIR)":/src:Z -w /src \
+	--device /dev/kvm \
+	$(NIX_IMAGE) \
+	nix --extra-experimental-features 'nix-command flakes'
+
+nix-build:
+	$(NIX_RUN) build --print-build-logs .#gaffer
+
+# Builds the package and boots a NixOS guest to check D-Bus activation.
+nix-check:
+	$(NIX_RUN) flake check --print-build-logs
+
+nix-shell:
+	$(NIX_RUN) develop
+
 clean:
 	$(CARGO) clean
-	rm -rf vendor
+	rm -rf vendor result
