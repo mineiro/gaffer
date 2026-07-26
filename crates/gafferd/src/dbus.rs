@@ -492,6 +492,91 @@ impl Publisher {
 mod tests {
     use super::*;
 
+    /// Render an interface's D-Bus contract: names, types and access, with doc
+    /// comments stripped.
+    ///
+    /// Comments are removed deliberately. The point of the snapshot is to catch
+    /// a renamed property or a changed signature — things that silently break
+    /// every client. If rewording a doc comment also failed the check, the
+    /// habit would become "regenerate the snapshot until it passes", which is
+    /// exactly the reflex that makes such a test worthless.
+    fn contract<I: zbus::object_server::Interface>(iface: &I) -> String {
+        let mut xml = String::new();
+        iface.introspect_to_writer(&mut xml, 0);
+
+        let mut out = String::new();
+        let mut in_comment = false;
+        for line in xml.lines() {
+            let line = line.trim();
+            if line.starts_with("<!--") {
+                in_comment = true;
+            }
+            if in_comment {
+                in_comment = !line.ends_with("-->");
+                continue;
+            }
+            if !line.is_empty() {
+                out.push_str(line);
+                out.push('\n');
+            }
+        }
+        out
+    }
+
+    fn light_iface() -> Light1 {
+        let (tx, rx) = mpsc::channel(1);
+        std::mem::forget(rx); // keep the channel open for the lifetime of the test
+        Light1::new(Arc::new(RwLock::new(World::default())), View::Group, tx)
+    }
+
+    fn manager_iface() -> Manager1 {
+        let (tx, rx) = mpsc::channel(1);
+        std::mem::forget(rx);
+        Manager1 { world: Arc::new(RwLock::new(World::default())), requests: tx }
+    }
+
+    /// Rewrites the committed snapshots. Run deliberately, after an intended
+    /// API change, and read the resulting diff before committing it:
+    ///
+    /// ```text
+    /// cargo test -p gafferd -- --ignored regenerate_api_snapshots
+    /// ```
+    #[test]
+    #[ignore = "generator: rewrites api/*.xml rather than checking them"]
+    fn regenerate_api_snapshots() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("api");
+        std::fs::create_dir_all(&dir).expect("create api dir");
+        std::fs::write(dir.join("Light1.xml"), contract(&light_iface())).expect("write Light1");
+        std::fs::write(dir.join("Manager1.xml"), contract(&manager_iface()))
+            .expect("write Manager1");
+    }
+
+    /// The D-Bus API is the contract every client binds to — the CLI, a panel
+    /// module, anything written against it. Nothing else in the build notices
+    /// if a property is renamed or its signature changes, so this does.
+    ///
+    /// Adding a property or method is free; this only fails on a rename, a
+    /// removal, or a type change. If it fails and the change was intended,
+    /// regenerate the snapshot and say so in the commit message — a client
+    /// somewhere needs updating too.
+    #[test]
+    fn the_light1_contract_is_unchanged() {
+        assert_eq!(
+            contract(&light_iface()),
+            include_str!("../api/Light1.xml"),
+            "io.mineiro.gaffer.Light1 changed shape; see the doc comment on this test"
+        );
+    }
+
+    #[test]
+    fn the_manager1_contract_is_unchanged() {
+        assert_eq!(
+            contract(&manager_iface()),
+            include_str!("../api/Manager1.xml"),
+            "io.mineiro.gaffer.Manager1 changed shape; see the doc comment on this test"
+        );
+    }
+
     #[test]
     fn object_paths_are_valid_dbus_elements() {
         // MAC separators are not legal in a path element.

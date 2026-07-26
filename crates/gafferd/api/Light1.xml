@@ -1,0 +1,22 @@
+<interface name="io.mineiro.gaffer.Light1">
+<method name="Apply">
+<arg name="tokens" type="as" direction="in"/>
+</method>
+<method name="Identify">
+</method>
+<method name="Refresh">
+</method>
+<property name="Address" type="s" access="read"/>
+<property name="Brightness" type="y" access="readwrite"/>
+<property name="Firmware" type="s" access="read"/>
+<property name="Id" type="s" access="read"/>
+<property name="Kelvin" type="q" access="readwrite"/>
+<property name="LastError" type="s" access="read"/>
+<property name="MaxKelvin" type="q" access="read"/>
+<property name="MinKelvin" type="q" access="read"/>
+<property name="Model" type="s" access="read"/>
+<property name="Name" type="s" access="read"/>
+<property name="On" type="b" access="readwrite"/>
+<property name="Online" type="b" access="read"/>
+<property name="OnlineCount" type="u" access="read"/>
+</interface>

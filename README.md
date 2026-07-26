@@ -27,6 +27,18 @@ gaffer owns the state once. Everything else is a thin client.
 
 ## Install
 
+### Fedora
+
+```sh
+sudo dnf copr enable mineiro/gaffer
+sudo dnf install gaffer
+```
+
+Fedora 44, x86_64 and aarch64. Builds track `main`, so `dnf upgrade` follows
+development; every commit produces a distinct version.
+
+### From source
+
 Needs Rust 1.88+ and a D-Bus session bus. Beyond glibc it links nothing — no
 GUI toolkit, no Avahi, no OpenSSL.
 
@@ -35,15 +47,20 @@ make && make install-user    # → ~/.local/bin, ~/.config/systemd/user, ~/.loca
 make uninstall-user          # removes all of it again
 ```
 
-Distro packages use `make DESTDIR=… PREFIX=/usr install`, which stages into a
+Packagers want `make DESTDIR=… PREFIX=/usr install`, which stages into a
 buildroot and touches nothing live.
+
+### Running it
 
 There is nothing to start. gaffer is **D-Bus activated**, so the first command
 launches it, and the activation file defers to systemd so the daemon gets a
 proper cgroup, journal capture and restart policy.
 
-Optionally keep it warm from login, so discovery has already settled by the time
-you press a key:
+Activation returns as soon as the daemon claims its bus name, which is *before*
+mDNS has found anything — so the very first command after a cold start can
+report no lights. If something is always watching, such as a status-bar module,
+keep the daemon resident instead and discovery will have settled long before
+anything asks:
 
 ```sh
 systemctl --user enable --now gaffer.service
@@ -124,6 +141,15 @@ The group implements the **same interface** as a single light, so controlling
 everything at once needs no special case. `ObjectManager` gives hotplug-aware
 enumeration for free, and writable `On`/`Brightness`/`Kelvin` properties emit
 `PropertiesChanged` when the hardware confirms.
+
+Treat `ObjectManager` as a subscription, not a one-shot query: read
+`GetManagedObjects` **and** stay on `InterfacesAdded`/`InterfacesRemoved`, or a
+client started before discovery finishes will show an empty list forever.
+
+The exact contract is committed as `crates/gafferd/api/*.xml` and pinned by a
+test, so a property cannot be renamed or retyped without a failing build and a
+visible diff. Note the types: `Brightness` is `y` (byte), `Kelvin` is `q`
+(uint16), `OnlineCount` is `u` (uint32).
 
 ```sh
 busctl --user tree io.mineiro.gaffer

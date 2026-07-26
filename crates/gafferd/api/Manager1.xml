@@ -1,0 +1,16 @@
+<interface name="io.mineiro.gaffer.Manager1">
+<method name="SetState">
+<arg name="selector" type="s" direction="in"/>
+<arg name="tokens" type="as" direction="in"/>
+<arg type="as" direction="out"/>
+</method>
+<method name="Identify">
+<arg name="selector" type="s" direction="in"/>
+<arg type="as" direction="out"/>
+</method>
+<method name="Rescan">
+</method>
+<property name="LightCount" type="u" access="read"/>
+<property name="OnlineCount" type="u" access="read"/>
+<property name="Version" type="s" access="read"/>
+</interface>

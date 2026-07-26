@@ -224,6 +224,27 @@ Units install to `%{_userunitdir}` (`/usr/lib/systemd/user`), not the system
 unit directory. gaffer is per-session and D-Bus activated; it must never be
 enabled as a system service.
 
+## The D-Bus API is a Contract
+
+`crates/gafferd/api/Light1.xml` and `Manager1.xml` are the published shape of
+the interface, pinned by tests in `dbus.rs`. Clients bind to it — the CLI, a
+status-bar module, anything written since — and nothing else in the build
+notices when a property is renamed or its signature changes.
+
+Adding a property or method is free. Renaming, removing or retyping one fails
+the build. When that is intended:
+
+```sh
+cargo test -p gafferd -- --ignored regenerate_api_snapshots
+```
+
+Read the resulting diff, and say in the commit message what clients must change.
+Doc comments are stripped before comparison, so rewording one is not a failure.
+
+Keep every exposed type fixed-width. A `usize` would introspect as `u` on
+32-bit and `t` on 64-bit, so the same commit would publish two different
+contracts across the aarch64 and x86_64 chroots.
+
 ## Security Model
 
 gaffer runs unprivileged in the user's session and holds no credentials. Two
