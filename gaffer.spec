@@ -6,13 +6,21 @@ Release:        1%{?dist}
 Summary:        Daemon and CLI for controlling Elgato Key Lights
 
 # gaffer's own code is GPL-3.0-or-later. Rust binaries statically link their
-# whole dependency tree, so the effective licence of the shipped artefacts is
-# the combination below.
+# whole dependency tree, so this is the *effective* licence of the shipped
+# artefacts, with every "OR" in the tree already resolved to one choice:
 #
-# VERIFY THIS against `%%{cargo_license_summary}` in the build log after any
-# dependency change — the expression is not auto-generated, and Fedora treats a
-# wrong License field as a blocker.
-License:        GPL-3.0-or-later AND (Apache-2.0 OR MIT) AND (Apache-2.0 WITH LLVM-exception) AND BSD-3-Clause AND Unicode-3.0 AND (Unlicense OR MIT)
+#   GPL-3.0-or-later  gaffer itself
+#   MIT               chosen for every dual/tri-licensed crate
+#   Apache-2.0        unavoidable: sync_wrapper is Apache-2.0 only
+#   Unicode-3.0       unavoidable: the ICU data crates
+#
+# Nothing here needs BSD-3-Clause, LLVM-exception or LGPL: each appears only as
+# one branch of an OR whose MIT branch was taken instead.
+#
+# VERIFY after any dependency change against the LICENSE SUMMARY block that
+# %%{cargo_license_summary} prints into the build log. Fedora treats a wrong
+# License field as a review blocker.
+License:        GPL-3.0-or-later AND MIT AND Apache-2.0 AND Unicode-3.0
 URL:            %{forgeurl}
 Source0:        %{forgeurl}/archive/v%{version}/%{name}-%{version}.tar.gz
 # Produced by `make vendor`; build roots have no network access.
