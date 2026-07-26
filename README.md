@@ -30,8 +30,11 @@ gaffer owns the state once. Everything else is a thin client.
 Needs Rust 1.85+ and a session bus. No system libraries.
 
 ```sh
-make install     # → ~/.local/bin, ~/.config/systemd/user, ~/.local/share/dbus-1
+make && make install-user    # → ~/.local/bin, ~/.config/systemd/user, ~/.local/share/dbus-1
 ```
+
+Distro packages use `make DESTDIR=… PREFIX=/usr install`, which stages into a
+buildroot and touches nothing live.
 
 There is nothing to start. gaffer is **D-Bus activated**, so the first command
 launches it, and the activation file defers to systemd so the daemon gets a
