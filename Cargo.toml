@@ -6,8 +6,14 @@ members = ["crates/gaffer-core", "crates/gafferd", "crates/gaffer"]
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/jnetto/gaffer"
+repository = "https://github.com/mineiro/gaffer"
 authors = ["Jose Tiburcio Ribeiro Netto <jnetto@mineiro.dev>"]
+
+# gaffer is distributed as distro packages, not through crates.io. A registry
+# can only copy binaries — it cannot install the systemd unit or the D-Bus
+# activation file, so a `cargo install` would leave a daemon that never starts.
+# Flip this per-crate if a library here ever gains an outside consumer.
+publish = false
 
 [workspace.dependencies]
 gaffer-core = { path = "crates/gaffer-core" }

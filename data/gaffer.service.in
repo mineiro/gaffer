@@ -1,6 +1,6 @@
 [Unit]
 Description=gaffer — studio light daemon
-Documentation=https://github.com/jnetto/gaffer
+Documentation=https://github.com/mineiro/gaffer
 # The session bus is the daemon's entire client API, so there is no point
 # starting without it.
 After=dbus.socket
