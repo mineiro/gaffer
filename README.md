@@ -37,6 +37,21 @@ sudo dnf install gaffer
 Fedora 43, 44 and rawhide, on x86_64 and aarch64. Builds track `main`, so
 `dnf upgrade` follows development; every commit produces a distinct version.
 
+### NixOS
+
+```nix
+{
+  inputs.gaffer.url = "github:mineiro/gaffer";
+
+  # in your configuration:
+  imports = [ inputs.gaffer.nixosModules.default ];
+  services.gaffer.enable = true;
+}
+```
+
+`services.gaffer.autoStart = true` keeps the daemon resident from login rather
+than activating on demand; `openFirewall` (on by default) permits inbound mDNS.
+
 ### From source
 
 Needs Rust 1.88+ and a D-Bus session bus. Beyond glibc it links nothing — no

@@ -245,6 +245,28 @@ Keep every exposed type fixed-width. A `usize` would introspect as `u` on
 32-bit and `t` on 64-bit, so the same commit would publish two different
 contracts across the aarch64 and x86_64 chroots.
 
+## Nix
+
+`flake.nix` exposes the package, a dev shell, a NixOS module and a VM check.
+Nix does not have to be installed on the host — the Makefile wraps a rootless
+container with a persistent `/nix` volume:
+
+```sh
+make nix-build   # just the package
+make nix-check   # package + the NixOS VM test
+```
+
+The VM check is the only test here that boots a machine, and it earns that:
+D-Bus activation cannot be exercised in a build sandbox. It is also the fiddly
+one, because gaffer is a *user* service — NixOS tests drive the guest as root,
+so the script lingers a user manager with `loginctl enable-linger` and runs
+everything as that user with `XDG_RUNTIME_DIR` set. Without it the test would
+pass while checking nothing.
+
+Assert behaviour, not paths, in that test: nixpkgs relocates user units from
+`lib/systemd/user` to `share/systemd/user` during fixup, so a path assertion
+tests nixpkgs' conventions rather than this module.
+
 ## Security Model
 
 gaffer runs unprivileged in the user's session and holds no credentials. Two
