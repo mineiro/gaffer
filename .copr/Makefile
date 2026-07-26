@@ -25,10 +25,13 @@ _srpm:
 	cp "$$stage/$$name-$$version.tar.gz" "$$stage/$$name-$$version-vendor.tar.xz" \
 		"$$(rpm -E %{_sourcedir})/"; \
 	mkdir -p "$(outdir)"; \
-	rpmbuild -bs gaffer.spec \
+	snap=$$(.copr/snaprel.sh); \
+	echo "snapshot release: $$snap"; \
+	sed "s|^%global snaprel .*|%global snaprel $$snap|" gaffer.spec \
+		> "$$stage/gaffer.spec"; \
+	rpmbuild -bs "$$stage/gaffer.spec" \
 		--define "_srcrpmdir $(outdir)" \
-		--define "_disable_source_fetch 1" \
-		--define "snaprel $$(.copr/snaprel.sh)"; \
+		--define "_disable_source_fetch 1"; \
 	rm -rf "$$stage"
 
 .PHONY: srpm _srpm

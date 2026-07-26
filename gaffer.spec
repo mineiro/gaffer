@@ -12,9 +12,14 @@
 # supersedes every snapshot that preceded it. The obvious 1.<date>git<sha> form
 # would invert that and make the real release look older than the snapshots.
 #
-# Undefined — a local rpmbuild, or rpmlint — this stays 1, so nothing about the
-# developer workflow changes.
-%{!?snaprel: %global snaprel 1}
+# .copr/Makefile rewrites the line below when it assembles the SRPM, so the
+# value travels *inside* the source package. Passing it as `rpmbuild --define`
+# is not enough: that only affects SRPM creation, and the binary RPM is built
+# by rebuilding the SRPM later, where the macro is gone and the release would
+# silently revert to 1.
+#
+# Left at 1 here, so a local rpmbuild or rpmlint behaves like a release build.
+%global snaprel 1
 
 Name:           gaffer
 Version:        0.1.0
