@@ -27,7 +27,7 @@ gaffer owns the state once. Everything else is a thin client.
 
 ## Install
 
-Needs Rust 1.85+ and a session bus. No system libraries.
+Needs Rust 1.88+ and a session bus. No system libraries.
 
 ```sh
 make && make install-user    # → ~/.local/bin, ~/.config/systemd/user, ~/.local/share/dbus-1

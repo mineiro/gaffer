@@ -65,11 +65,12 @@ deadlock against the reconciler emitting on that same object. Never hold a
 
 ## Build, Test, and Development Commands
 
-Requires Rust 1.85+ (edition 2024). No system libraries beyond a session bus.
+Requires Rust 1.88+ (edition 2024; let-chains set the floor). No system libraries beyond a session bus.
 
 - `cargo build --workspace` — build everything.
 - `cargo test --workspace` — run all tests; needs no hardware or network.
-- `make install` — install to `~/.local`, wire up systemd + D-Bus activation.
+- `make install-user` — install to `~/.local`, wire up systemd + D-Bus activation.
+- `make DESTDIR=/tmp/root PREFIX=/usr install` — staged install, as a package does.
 - `GAFFER_LOG=debug ./target/debug/gafferd` — run the daemon in the foreground.
 - `busctl --user tree io.mineiro.gaffer` — inspect the published object tree.
 - `dbus-monitor --session "type='signal',interface='org.freedesktop.DBus.Properties'"`
@@ -193,6 +194,55 @@ already emits a generic `Discovered`, and `World`/`Light1` know nothing about
 Elgato beyond the module they call.
 
 Do not commit protocol code you cannot exercise against real hardware.
+
+## Packaging
+
+Packaging lives in-tree, deliberately: it cannot drift out of lockstep with the
+code, and a Nix flake has to sit at the repo root anyway. If gaffer ever reaches
+official Fedora or Debian, those projects take packaging into their own dist-git
+and the split happens on its own.
+
+- `gaffer.spec` — Fedora/COPR.
+- `.copr/Makefile` — COPR's "Make SRPM" entry point. This is the only build
+  stage with network access, so it is where `cargo vendor` runs; the RPM build
+  itself is offline, as Fedora requires.
+
+Four things that will silently break a package if changed carelessly:
+
+- **`make install` must stay `DESTDIR`-safe.** No `systemctl`, no writes outside
+  `$(DESTDIR)`, and no dependency on `build` — packagers compile separately with
+  their own flags.
+- **`@BINDIR@` substitutes `$(BINDIR)`, never `$(DESTDIR)$(BINDIR)`.** Baking the
+  staging root into a unit file ships a service pointing at a build-machine path.
+- **`ARTIFACTDIR` exists because `%cargo_build` emits to `target/rpm`,** not
+  `target/release`. The spec overrides it.
+- **The `License:` field covers the whole statically-linked tree,** not just
+  gaffer. It is not auto-generated — after any dependency change, check it
+  against `%{cargo_license_summary}` in the build log.
+
+Units install to `%{_userunitdir}` (`/usr/lib/systemd/user`), not the system
+unit directory. gaffer is per-session and D-Bus activated; it must never be
+enabled as a system service.
+
+## Security Model
+
+gaffer runs unprivileged in the user's session and holds no credentials. Two
+properties worth preserving:
+
+- **The session bus is the trust boundary.** Any process in the user's session
+  can control the lights, which is the same access it would have by talking to
+  them directly over the LAN. There is no privilege to escalate.
+- **Endpoints come from mDNS, which is unauthenticated.** Anything on the local
+  link can advertise `_elg._tcp.local` and make gafferd issue Elgato-shaped HTTP
+  requests to a host and port of its choosing. This is inherent to zero-config
+  discovery — Avahi, luz and Photon all share it — and the attacker must already
+  be on the link, where they could reach the lights unaided. Worth knowing before
+  adding anything that acts on discovered data more consequentially than a
+  brightness change.
+
+The daemon contains no `unsafe`, and no `unwrap`/`expect`/`panic` outside tests:
+a panic in a session service is a denial of service, so keep it that way. No TLS
+stack is linked in, because the devices speak plain HTTP on the LAN.
 
 ## Commit & Pull Request Guidelines
 

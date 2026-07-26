@@ -17,6 +17,11 @@ DBUSDIR ?= $(PREFIX)/share/dbus-1/services
 
 CARGO   ?= cargo
 
+# Where the compiled binaries land. Fedora's %cargo_build uses its own profile
+# and emits into target/rpm, so packaging overrides this rather than being
+# forced to re-run cargo with our flags.
+ARTIFACTDIR ?= target/release
+
 .PHONY: all build test check install install-user uninstall uninstall-user clean vendor
 
 all: build
@@ -38,8 +43,8 @@ check:
 # Note the @BINDIR@ substitution uses $(BINDIR), never $(DESTDIR)$(BINDIR) —
 # DESTDIR is a staging prefix that must not survive into an installed file.
 install:
-	install -Dm755 target/release/gafferd $(DESTDIR)$(BINDIR)/gafferd
-	install -Dm755 target/release/gaffer  $(DESTDIR)$(BINDIR)/gaffer
+	install -Dm755 $(ARTIFACTDIR)/gafferd $(DESTDIR)$(BINDIR)/gafferd
+	install -Dm755 $(ARTIFACTDIR)/gaffer  $(DESTDIR)$(BINDIR)/gaffer
 	install -d $(DESTDIR)$(UNITDIR) $(DESTDIR)$(DBUSDIR)
 	sed 's|@BINDIR@|$(BINDIR)|g' data/gaffer.service.in \
 		> $(DESTDIR)$(UNITDIR)/gaffer.service

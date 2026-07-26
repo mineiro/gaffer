@@ -10,3 +10,9 @@
 *.pdb
 *.dwp
 *.dwo
+
+# `make vendor` output and local rpmbuild artefacts.
+/vendor
+*.rpm
+*.tar.gz
+*.tar.xz
