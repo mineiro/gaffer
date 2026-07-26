@@ -34,8 +34,8 @@ sudo dnf copr enable mineiro/gaffer
 sudo dnf install gaffer
 ```
 
-Fedora 44, x86_64 and aarch64. Builds track `main`, so `dnf upgrade` follows
-development; every commit produces a distinct version.
+Fedora 43, 44 and rawhide, on x86_64 and aarch64. Builds track `main`, so
+`dnf upgrade` follows development; every commit produces a distinct version.
 
 ### From source
 
