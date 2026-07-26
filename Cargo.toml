@@ -5,6 +5,10 @@ members = ["crates/gaffer-core", "crates/gafferd", "crates/gaffer"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+# Let-chains (`if let ... && ...`) are used in the daemon and CLI; they
+# stabilised for edition 2024 in 1.88, which sets the floor — not the 1.85
+# that edition 2024 alone would imply.
+rust-version = "1.88"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/mineiro/gaffer"
 authors = ["Jose Tiburcio Ribeiro Netto <jnetto@mineiro.dev>"]
