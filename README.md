@@ -8,8 +8,8 @@ them on the D-Bus session bus, plus a CLI that makes them bindable to a key.
 ```console
 $ gaffer list
 NAME                    STATE    BRIGHT    TEMP  ADDRESS
-Elgato Key Light Left   on          42%   4200K  http://192.168.1.63:9123
-Elgato Key Light Right  on          42%   4200K  http://192.168.1.137:9123
+Elgato Key Light Left   on          42%   4200K  http://192.0.2.10:9123
+Elgato Key Light Right  on          42%   4200K  http://192.0.2.11:9123
 All Lights              on          42%   4200K  2 of 2 online
 
 $ gaffer set left 42% 4200k
@@ -27,10 +27,12 @@ gaffer owns the state once. Everything else is a thin client.
 
 ## Install
 
-Needs Rust 1.88+ and a session bus. No system libraries.
+Needs Rust 1.88+ and a D-Bus session bus. Beyond glibc it links nothing — no
+GUI toolkit, no Avahi, no OpenSSL.
 
 ```sh
 make && make install-user    # → ~/.local/bin, ~/.config/systemd/user, ~/.local/share/dbus-1
+make uninstall-user          # removes all of it again
 ```
 
 Distro packages use `make DESTDIR=… PREFIX=/usr install`, which stages into a
@@ -56,7 +58,7 @@ Value suffixes carry the unit, so order never matters and everything composes:
 
 | Token | Meaning |
 |-------|---------|
-| `42%` | set brightness | 
+| `42%` | set brightness |
 | `+10%` / `-10%` | adjust brightness, clamped |
 | `4200k` | set colour temperature (2900–7000K) |
 | `-200k` | warm by 200K |
@@ -131,17 +133,62 @@ busctl --user set-property io.mineiro.gaffer \
 
 ## Hardware
 
-Elgato Key Light, Key Light Air, Ring Light — anything advertising
-`_elg._tcp.local` with the Key Light HTTP API on port 9123. Lights are keyed on
-the MAC from their mDNS TXT record, so renaming one in Elgato's app does not
-make it reappear as a stranger.
+**Verified:** Elgato Key Light MK.2 (`20GAK9902`).
+
+**Should work, untested:** Key Light, Key Light Air, Ring Light, Light Strip —
+anything advertising `_elg._tcp.local` and serving the Key Light HTTP API on
+port 9123. They share one protocol, so the odds are good, but nobody has run
+gaffer against them. Reports either way are welcome.
+
+Lights are keyed on the MAC from their mDNS TXT record, so renaming one in
+Elgato's app does not make it reappear as a stranger.
+
+## Troubleshooting
+
+**No lights found.** Confirm the network sees them at all:
+
+```sh
+avahi-browse -rtp _elg._tcp
+```
+
+If that comes up empty, the problem is below gaffer. Lights must be on the same
+layer-2 network — mDNS does not cross subnets or most guest/IoT VLAN isolation —
+and inbound mDNS must be permitted. Fedora Workstation allows it by default;
+check with `firewall-cmd --list-services | grep mdns` and add it with
+`firewall-cmd --add-service=mdns --permanent` if it is missing.
+
+**Commands fail with "name not activatable."** The D-Bus activation file did not
+install. Re-run `make install-user` and check
+`~/.local/share/dbus-1/services/io.mineiro.gaffer.service` exists.
+
+**A light shows `offline`.** gaffer discovered it but cannot reach its HTTP API.
+`gaffer list` prints the transport error next to the address; the daemon retries
+every 15 s and recovers on its own once the light is reachable.
+
+For anything else, `journalctl --user -u gaffer -f` with
+`systemctl --user set-environment GAFFER_LOG=debug`.
+
+## Scope
+
+gaffer controls LAN studio lights from a Linux desktop session, and deliberately
+stops there. Not planned: Windows or macOS, Elgato's cloud or mobile app,
+Stream Deck integration, or Bluetooth/Zigbee bulbs. Support for other LAN light
+protocols is plausible — the discovery, backend and device layers are separate
+seams — but nothing beyond Elgato is implemented today.
 
 ## Status
 
-Discovery, control, grouping, the D-Bus API, the CLI and panel integration all
-work and are verified against real hardware. Scenes (`gaffer scene "on camera"`)
-and camera-follow — turning the key light on when the webcam goes live — are the
-next pieces, and are why this is a daemon rather than a script.
+Working today, verified against real hardware: discovery, control, grouping,
+the D-Bus API, the CLI, and the Waybar module.
+
+**Not implemented yet** — listed so nobody goes looking for them:
+
+- `gaffer scene "on camera"` — named scenes saved to TOML.
+- Camera-follow — turning the key lights on when the webcam goes live, via
+  PipeWire. This is the feature that makes a daemon worth having over a script.
+- `gaffer link left right --offset` — a leader/follower relationship between
+  lights. Deferred because naive two-way linking oscillates; links have to be
+  directional and propagation has to be marked so it never round-trips.
 
 ## Licence
 

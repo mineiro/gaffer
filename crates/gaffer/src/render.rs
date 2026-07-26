@@ -145,7 +145,7 @@ mod tests {
         LightInfo {
             id: "00:00:5E:00:53:01".into(),
             name: name.into(),
-            address: "http://192.168.1.63:9123".into(),
+            address: "http://192.0.2.10:9123".into(),
             online,
             on,
             brightness: 42,

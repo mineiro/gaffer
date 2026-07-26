@@ -334,10 +334,10 @@ mod tests {
     fn base_url_prefers_the_resolved_address() {
         let with_addr = Endpoint {
             host: "elgato-key-light-left.local.".into(),
-            addr: Some(Ipv4Addr::new(192, 168, 1, 63)),
+            addr: Some(Ipv4Addr::new(192, 0, 2, 10)),
             port: 9123,
         };
-        assert_eq!(with_addr.base_url(), "http://192.168.1.63:9123");
+        assert_eq!(with_addr.base_url(), "http://192.0.2.10:9123");
 
         let without = Endpoint { addr: None, ..with_addr };
         assert_eq!(without.base_url(), "http://elgato-key-light-left.local:9123");
