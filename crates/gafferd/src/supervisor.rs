@@ -249,12 +249,29 @@ impl Supervisor {
                     }
                 }
                 Err(error) => {
+                    let was_online =
+                        self.world.read().await.get(&id).is_some_and(LightRecord::online);
+
                     self.update(&id, |light| {
                         light.reported = None; // no report *is* offline
                         light.last_error = error.clone();
                     })
                     .await;
-                    debug!(%id, %error, "light unreachable");
+
+                    if pushed {
+                        // A command the user issued did not reach the hardware.
+                        // The D-Bus reply already said "accepted", and the CLI
+                        // has exited, so this log line is the only place the
+                        // loss is ever visible. Always warn, even for a light
+                        // that was already unreachable.
+                        warn!(%id, %error, "push failed; the light did not change");
+                    } else if was_online {
+                        // Warn on the transition only. A light that is simply
+                        // absent would otherwise log every refresh, forever.
+                        warn!(%id, %error, "light became unreachable");
+                    } else {
+                        debug!(%id, %error, "light still unreachable");
+                    }
                 }
             },
             Io::Info { id, info } => {

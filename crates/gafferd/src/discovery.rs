@@ -90,8 +90,17 @@ impl Discovery {
                 let outgoing = match event {
                     ServiceEvent::ServiceResolved(service) => match resolve(&service) {
                         Some(found) => {
-                            ids.insert(found.fullname.clone(), found.id.clone());
-                            info!(id = %found.id, name = %found.name, addr = ?found.addr, "light discovered");
+                            // mDNS re-resolves the same instance repeatedly, so
+                            // announce only the first sighting; otherwise a
+                            // perfectly stable network fills the journal with
+                            // duplicate "discovered" lines.
+                            let first_sighting =
+                                ids.insert(found.fullname.clone(), found.id.clone()).is_none();
+                            if first_sighting {
+                                info!(id = %found.id, name = %found.name, addr = ?found.addr, "light discovered");
+                            } else {
+                                debug!(id = %found.id, addr = ?found.addr, "light re-resolved");
+                            }
                             Some(DiscoveryEvent::Found(Box::new(found)))
                         }
                         None => {
