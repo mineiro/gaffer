@@ -27,7 +27,8 @@ _srpm:
 	mkdir -p "$(outdir)"; \
 	rpmbuild -bs gaffer.spec \
 		--define "_srcrpmdir $(outdir)" \
-		--define "_disable_source_fetch 1"; \
+		--define "_disable_source_fetch 1" \
+		--define "snaprel $$(.copr/snaprel.sh)"; \
 	rm -rf "$$stage"
 
 .PHONY: srpm _srpm

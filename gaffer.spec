@@ -1,8 +1,24 @@
 %global forgeurl https://github.com/mineiro/gaffer
 
+# Snapshot builds (see .copr/Makefile) override this with
+#
+#     0.<HEAD commit timestamp>.git<short sha>
+#
+# so that every commit produces a distinct NVR — dnf keys on NEVRA, and a
+# repository that rebuilds the same 0.1.0-1 forever looks frozen to clients.
+#
+# The leading 0 is load-bearing: RPM compares release segment by segment, so
+# 0.<anything> sorts *below* a plain 1, and the first tagged release therefore
+# supersedes every snapshot that preceded it. The obvious 1.<date>git<sha> form
+# would invert that and make the real release look older than the snapshots.
+#
+# Undefined — a local rpmbuild, or rpmlint — this stays 1, so nothing about the
+# developer workflow changes.
+%{!?snaprel: %global snaprel 1}
+
 Name:           gaffer
 Version:        0.1.0
-Release:        1%{?dist}
+Release:        %{snaprel}%{?dist}
 Summary:        Daemon and CLI for controlling Elgato Key Lights
 
 # gaffer's own code is GPL-3.0-or-later. Rust binaries statically link their
