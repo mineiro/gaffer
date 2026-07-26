@@ -207,6 +207,18 @@ and the split happens on its own.
   stage with network access, so it is where `cargo vendor` runs; the RPM build
   itself is offline, as Fedora requires.
 
+**Pushing to `main` builds a package.** A GitHub webhook posts to COPR, which
+rebuilds all six chroots — roughly seven minutes, including for docs-only
+commits. Note that `copr-cli add-package-scm --webhook-rebuild on` only makes
+COPR *accept* such a request; the webhook on the GitHub side is what sends it,
+and the two are configured separately. If pushes stop producing builds, check
+the delivery log under the repository's webhook settings before suspecting the
+spec.
+
+The webhook deliberately carries its token in the URL path, which is how COPR
+authenticates it; GitHub's separate "Secret" field must be left empty, since
+COPR does not verify the `X-Hub-Signature-256` header that field produces.
+
 Four things that will silently break a package if changed carelessly:
 
 - **`make install` must stay `DESTDIR`-safe.** No `systemctl`, no writes outside
