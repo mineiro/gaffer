@@ -34,8 +34,18 @@ sudo dnf copr enable mineiro/gaffer
 sudo dnf install gaffer
 ```
 
-Fedora 43, 44 and rawhide, on x86_64 and aarch64. Builds track `main`, so
-`dnf upgrade` follows development; every commit produces a distinct version.
+Fedora 43, 44 and rawhide, on x86_64 and aarch64.
+
+Builds track `main`, and every commit produces a distinct version — so use
+`--refresh` when you upgrade:
+
+```sh
+sudo dnf --refresh upgrade gaffer
+```
+
+Without it dnf serves cached repository metadata, which for a repo that
+rebuilds on every push routinely means being told there is nothing to do while
+a newer build sits in the repo.
 
 ### NixOS
 
