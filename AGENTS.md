@@ -236,6 +236,30 @@ Units install to `%{_userunitdir}` (`/usr/lib/systemd/user`), not the system
 unit directory. gaffer is per-session and D-Bus activated; it must never be
 enabled as a system service.
 
+## The Deployed Build Is the Contract
+
+A client binds to whatever daemon is *running*, not to `main`. Pushing a new
+verb makes it real in the repository and, minutes later, in COPR — but not on
+anyone's machine until they upgrade, which is a manual step. Twice now a client
+has been designed against a verb that was not yet on the bus.
+
+So when adding to the D-Bus surface, say plainly that it needs an upgrade to
+appear, and check what is actually deployed before discussing availability:
+
+```sh
+rpm -q gaffer                                    # what is installed
+busctl --user introspect io.mineiro.gaffer \
+    /io/mineiro/gaffer io.mineiro.gaffer.Manager1  # what is on the bus
+sudo dnf --refresh upgrade gaffer && systemctl --user restart gaffer.service
+```
+
+`--refresh` is not optional: dnf caches repository metadata, and this repo
+rebuilds on every push, so a plain upgrade routinely reports nothing to do.
+
+Clients should probe rather than assume — introspect `Manager1` once at startup
+and fall back when a verb is absent. That keeps a panel working against an older
+daemon instead of failing at the first call.
+
 ## The D-Bus API is a Contract
 
 `crates/gafferd/api/Light1.xml` and `Manager1.xml` are the published shape of
