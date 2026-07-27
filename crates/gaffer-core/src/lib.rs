@@ -21,6 +21,7 @@
 pub mod color;
 pub mod group;
 pub mod link;
+pub mod scene;
 pub mod selector;
 pub mod state;
 pub mod text;
@@ -28,6 +29,7 @@ pub mod units;
 
 pub use color::{MAX_KELVIN, MIN_KELVIN, kelvin_to_mired, mired_to_kelvin};
 pub use link::{Link, LinkMode};
+pub use scene::{Scene, SceneGang, SceneLamp, ScenePlan};
 pub use selector::Selector;
 pub use state::{Adjust, LightState, MAX_BRIGHTNESS, Power, StatePatch};
 pub use text::{normalize_id, sanitize};
