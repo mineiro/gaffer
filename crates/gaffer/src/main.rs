@@ -13,6 +13,8 @@ mod render;
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use std::io::Write;
+
 use futures_util::StreamExt;
 
 use crate::proxy::{LightInfo, ManagerProxy};
@@ -204,6 +206,8 @@ fn split_selector(args: &[String]) -> (String, Vec<String>) {
 /// incrementally: with a handful of lights the round trip is free, and a
 /// re-read cannot drift out of sync with the daemon.
 async fn watch(connection: &zbus::Connection, waybar: bool) -> Result<()> {
+    die_with_parent();
+
     let render = |lights: &[LightInfo]| {
         if waybar { render::waybar(lights) } else { render::line(lights) }
     };
@@ -235,12 +239,39 @@ async fn watch(connection: &zbus::Connection, waybar: bool) -> Result<()> {
         // rendered form keeps a slider drag from flooding the panel.
         let rendered = render(&lights);
         if rendered != previous {
-            println!("{rendered}");
+            // Rust ignores SIGPIPE, so a closed reader surfaces as an error
+            // here rather than a signal. Leave quietly: the consumer is gone,
+            // which is a reason to stop, not to fail.
+            if writeln!(std::io::stdout(), "{rendered}").is_err() {
+                return Ok(());
+            }
             previous = rendered;
         }
     }
 
     Ok(())
+}
+
+/// Ask the kernel to kill us when whoever started us dies.
+///
+/// `watch` runs forever by design, and a status bar spawns it as a child. When
+/// the bar restarts, the old `watch` is reparented to init and keeps a D-Bus
+/// subscription open — it never notices, because it only writes when the
+/// rendering changes and a blocked process cannot discover a dead reader. One
+/// leaks per bar restart.
+///
+/// `PR_SET_PDEATHSIG` closes that: the kernel signals us the moment the parent
+/// goes. Best-effort — a failure here is not worth refusing to run over.
+fn die_with_parent() {
+    use rustix::process::{Signal, set_parent_process_death_signal};
+
+    let _ = set_parent_process_death_signal(Some(Signal::TERM));
+
+    // PDEATHSIG only fires on *future* parent death, so a process that was
+    // already orphaned before it got here would still linger.
+    if rustix::process::getppid().is_none() {
+        std::process::exit(0);
+    }
 }
 
 #[cfg(test)]

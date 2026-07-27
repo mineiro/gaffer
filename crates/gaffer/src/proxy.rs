@@ -64,6 +64,23 @@ pub struct LightInfo {
     pub brightness: u8,
     pub kelvin: u16,
     pub last_error: String,
+    /// The gang this light belongs to, if any: mode plus every member's
+    /// brightness offset from the gang's level.
+    pub gang: Option<Gang>,
+}
+
+/// A gang as a client sees it.
+#[derive(Clone, Debug)]
+pub struct Gang {
+    pub mode: String,
+    pub members: Vec<(String, i32)>,
+}
+
+impl Gang {
+    /// This light's own offset from the gang's level.
+    pub fn offset_of(&self, id: &str) -> i32 {
+        self.members.iter().find(|(m, _)| m == id).map_or(0, |(_, o)| *o)
+    }
 }
 
 impl LightInfo {
@@ -111,6 +128,17 @@ pub async fn lights(connection: &zbus::Connection) -> Result<Vec<LightInfo>> {
         })
         .collect();
 
+    // Gangs live on the manager, not on each light, so stitch them in here —
+    // otherwise every consumer of this function would have to make the second
+    // call and do the join itself.
+    let gangs = ManagerProxy::new(connection).await?.links().await.unwrap_or_default();
+    for light in &mut lights {
+        light.gang = gangs
+            .iter()
+            .find(|(_, members)| members.iter().any(|(id, _)| *id == light.id))
+            .map(|(mode, members)| Gang { mode: mode.clone(), members: members.clone() });
+    }
+
     // Group last, then alphabetical: the individual lights are what you scan
     // for, and the summary reads better as a footer.
     lights.sort_by(|a, b| a.is_group().cmp(&b.is_group()).then_with(|| a.name.cmp(&b.name)));
@@ -131,6 +159,8 @@ fn from_properties(path: &str, properties: &HashMap<String, OwnedValue>) -> Ligh
         brightness: number(properties, "Brightness"),
         kelvin: number(properties, "Kelvin"),
         last_error: string(properties, "LastError"),
+        // Filled in by `lights()` once the gangs have been fetched.
+        gang: None,
     }
 }
 

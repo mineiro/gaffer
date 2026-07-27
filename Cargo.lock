@@ -383,6 +383,7 @@ dependencies = [
  "clap",
  "futures-util",
  "gaffer-core",
+ "rustix",
  "serde_json",
  "tokio",
  "zbus",

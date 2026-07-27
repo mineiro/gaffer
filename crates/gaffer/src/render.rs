@@ -26,7 +26,14 @@ pub fn table(lights: &[LightInfo]) -> String {
         let address = if light.is_group() {
             format!("{} of {} online", light.online_count, lights.len().saturating_sub(1))
         } else if light.last_error.is_empty() {
-            light.address.clone()
+            // The ⧉ mark and the offset, as the panel draws them.
+            match &light.gang {
+                Some(gang) => {
+                    let offset = gang.offset_of(&light.id);
+                    format!("{}  ⧉ {} {offset:+}", light.address, gang.mode)
+                }
+                None => light.address.clone(),
+            }
         } else {
             // A failing light is the case you most want explained in place.
             format!("{}  ({})", light.address, first_line(&light.last_error))
@@ -62,6 +69,13 @@ pub fn json(lights: &[LightInfo]) -> String {
                 "kelvin": light.kelvin,
                 "group": light.is_group(),
                 "lastError": light.last_error,
+                // Null when ungangeed, so a consumer can branch on presence
+                // rather than on a sentinel.
+                "gang": light.gang.as_ref().map(|gang| json!({
+                    "mode": gang.mode,
+                    "offset": gang.offset_of(&light.id),
+                    "members": gang.members.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+                })),
             })
         })
         .collect();

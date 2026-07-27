@@ -114,7 +114,7 @@ gaffer set left 42% 4200k    # one light, absolute
 gaffer set all -10%          # dim everything by 10
 gaffer on right 80%          # power on and set, in one command
 gaffer identify left         # blink it, to tell which is which
-gaffer list --json           # for scripts
+gaffer list --json           # for scripts; carries gang membership
 ```
 
 `set` changes exactly what you name — it never implicitly powers a light on.
