@@ -303,6 +303,20 @@ Rules the design fixes, all of them tested:
   the offsets or leaving dead travel.
 - **A lamp is in at most one gang**, which is what lets a panel draw one wire
   per port.
+- **The first lamp named is the gang's reference** — `link a b` reads "link b
+  onto a" — and it is the lamp whose values win a mirror. Stored explicitly,
+  because "which lamp wins" must stay answerable after alt-drags have moved the
+  offsets around. `Manager1.Links` carries it **by position**: the first member
+  in each gang's list is the reference, which keeps that property's signature
+  stable for clients already reading it.
+
+Signalling rule: **emit exactly what changed.** Ganging alters no light property
+and no counter, so `Request::LinksChanged` emits `Manager1.Links` and nothing
+else. An earlier version emitted `meta` per lamp — claiming Name, Model,
+Firmware and Address had changed when none had — and a client was left treating
+that false burst as the bell for a gang appearing. If a mode change *moves*
+lamps, those travel as an ordinary `Applied`, so brightness is announced through
+the normal path.
 
 Propagation happens once, inside `World::apply`, and never re-enters. Gangs are
 deliberately *not* expanded when the reconciler adopts hardware state: links

@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::Instant;
 
-use gaffer_core::{Adjust, LightState, Link, Power, Selector, StatePatch, group};
+use gaffer_core::{Adjust, LightState, Link, LinkMode, Power, Selector, StatePatch, group};
 
 /// Stable identity of a light — the `id=` field from its mDNS TXT record.
 pub type LightId = String;
@@ -248,11 +248,13 @@ impl World {
             self.unlink(id);
         }
 
-        let states: BTreeMap<String, LightState> = present
+        // Ordered, not a map: the first lamp named is the reference, so
+        // `link a b` reads "link b onto a" and a later mirror snaps onto a.
+        let members: Vec<(String, LightState)> = present
             .iter()
             .filter_map(|id| Some((id.clone(), self.lights.get(id)?.desired)))
             .collect();
-        self.links.push(Link::learn(&states));
+        self.links.push(Link::learn(&members));
         present
     }
 
@@ -277,6 +279,32 @@ impl World {
     /// Replace a gang's stored links wholesale, for restoring from config.
     pub fn set_links(&mut self, links: Vec<Link>) {
         self.links = links;
+    }
+
+    /// Change how a lamp's gang tracks.
+    ///
+    /// Mirroring is destructive — every member snaps onto the gang's reference,
+    /// the lamp named first when it was made — so the moved lamps are returned
+    /// as ordinary changes for the caller to push and announce.
+    pub fn set_link_mode(&mut self, id: &str, mode: LinkMode) -> Vec<(LightId, Changed)> {
+        let states: BTreeMap<String, LightState> =
+            self.lights.iter().map(|(id, light)| (id.clone(), light.desired)).collect();
+
+        let Some(link) = self.links.iter_mut().find(|link| link.contains(id)) else {
+            return Vec::new();
+        };
+        let Some(moved) = link.set_mode(mode, &states) else {
+            return Vec::new(); // switching to offset moves nothing
+        };
+
+        let now = Instant::now();
+        moved
+            .into_iter()
+            .filter_map(|(id, next)| {
+                let light = self.lights.get_mut(&id)?;
+                Some((id, light.set_desired(next, now)?))
+            })
+            .collect()
     }
 
     /// Teach a lamp's gang a new difference after it moved on its own.

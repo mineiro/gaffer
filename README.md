@@ -125,6 +125,7 @@ Use `on` when you mean on.
 ```sh
 gaffer link left right    # they now move as one instrument
 gaffer set left +10%      # both rise, keeping their difference
+gaffer link --mirror a b  # snap b onto a instead of keeping the difference
 gaffer unlink left        # break the gang
 ```
 

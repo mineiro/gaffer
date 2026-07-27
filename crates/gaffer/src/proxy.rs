@@ -40,6 +40,9 @@ pub trait Manager {
     /// Break the gang a light belongs to; returns every light affected.
     fn unlink(&self, selector: &str) -> zbus::Result<Vec<String>>;
 
+    /// Change how a gang tracks: `offset` or `mirror`.
+    fn set_link_mode(&self, selector: &str, mode: &str) -> zbus::Result<()>;
+
     /// Gangs as `(mode, [(light id, brightness offset)])`.
     #[zbus(property)]
     fn links(&self) -> zbus::Result<Vec<(String, Vec<(String, i32)>)>>;
@@ -73,6 +76,8 @@ pub struct LightInfo {
 #[derive(Clone, Debug)]
 pub struct Gang {
     pub mode: String,
+    /// The lamp whose values win when the gang is mirrored.
+    pub reference: String,
     pub members: Vec<(String, i32)>,
 }
 
@@ -136,7 +141,12 @@ pub async fn lights(connection: &zbus::Connection) -> Result<Vec<LightInfo>> {
         light.gang = gangs
             .iter()
             .find(|(_, members)| members.iter().any(|(id, _)| *id == light.id))
-            .map(|(mode, members)| Gang { mode: mode.clone(), members: members.clone() });
+            .map(|(mode, members)| Gang {
+                mode: mode.clone(),
+                // By contract the first member is the gang's reference.
+                reference: members.first().map(|(id, _)| id.clone()).unwrap_or_default(),
+                members: members.clone(),
+            });
     }
 
     // Group last, then alphabetical: the individual lights are what you scan

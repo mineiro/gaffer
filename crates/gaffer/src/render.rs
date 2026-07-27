@@ -73,6 +73,7 @@ pub fn json(lights: &[LightInfo]) -> String {
                 // rather than on a sentinel.
                 "gang": light.gang.as_ref().map(|gang| json!({
                     "mode": gang.mode,
+                    "reference": gang.reference,
                     "offset": gang.offset_of(&light.id),
                     "members": gang.members.iter().map(|(id, _)| id).collect::<Vec<_>>(),
                 })),
@@ -166,6 +167,38 @@ mod tests {
             kelvin: 4200,
             ..Default::default()
         }
+    }
+
+    fn ganged(name: &str, offset: i32) -> LightInfo {
+        LightInfo {
+            gang: Some(crate::proxy::Gang {
+                mode: "offset".into(),
+                reference: "3C:6A:9D:26:6B:74".into(),
+                members: vec![("3C:6A:9D:26:6B:74".into(), 0), ("other".into(), offset)],
+            }),
+            ..light(name, true, true)
+        }
+    }
+
+    #[test]
+    fn a_ganged_light_shows_its_mark_and_offset() {
+        let rendered = table(&[ganged("Left", -7)]);
+        assert!(rendered.contains('⧉'), "{rendered}");
+        assert!(rendered.contains("offset"), "{rendered}");
+    }
+
+    #[test]
+    fn json_carries_the_gang_including_its_reference() {
+        let parsed: Value = serde_json::from_str(&json(&[ganged("Left", -7)])).unwrap();
+        assert_eq!(parsed[0]["gang"]["mode"], "offset");
+        assert_eq!(parsed[0]["gang"]["reference"], "3C:6A:9D:26:6B:74");
+        assert_eq!(parsed[0]["gang"]["offset"], 0);
+    }
+
+    #[test]
+    fn an_ungangeed_light_reports_null_rather_than_a_sentinel() {
+        let parsed: Value = serde_json::from_str(&json(&[light("Left", true, true)])).unwrap();
+        assert!(parsed[0]["gang"].is_null());
     }
 
     fn group(on: bool, online_count: u32) -> LightInfo {

@@ -128,17 +128,14 @@ impl Supervisor {
                 }
                 self.emit_group_diff(group_before, group_after).await;
             }
-            Request::LinksChanged(affected) => {
+            Request::LinksChanged => {
                 self.save_links().await;
-                // A gang's shape is not a light property, so nothing is emitted
-                // per lamp; clients watch Manager1.Links. The affected lamps
-                // still get a nudge because ganging can move them.
-                for id in affected {
-                    self.publisher
-                        .notify_light(&id, Changed { meta: true, ..Changed::default() })
-                        .await;
-                }
-                self.publisher.notify_manager().await;
+                // Exactly one thing changed, so exactly one signal. Ganging
+                // alters no light property and no counter: emitting `meta` per
+                // lamp claimed Name/Model/Firmware/Address had changed when
+                // they had not, and clients were forced to treat that false
+                // burst as the bell for a gang appearing.
+                self.publisher.notify_links().await;
             }
             Request::RefreshAll => self.refresh_all().await,
             Request::Rescan => {

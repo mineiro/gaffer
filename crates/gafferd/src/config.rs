@@ -28,6 +28,10 @@ pub struct Config {
 struct StoredLink {
     /// `offset` (members keep their difference) or `mirror` (identical values).
     mode: String,
+    /// The member whose values win when mirrored — the lamp named first when
+    /// the gang was made. Optional so older files still load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reference: Option<String>,
     /// Member id → brightness offset from the gang's level.
     offsets: BTreeMap<String, i32>,
 }
@@ -104,7 +108,7 @@ impl Config {
                     "mirror" => LinkMode::Mirror,
                     _ => LinkMode::Offset,
                 };
-                Link::from_parts(mode, stored.offsets.clone())
+                Link::from_parts(mode, stored.reference.clone(), stored.offsets.clone())
             })
             .collect()
     }
@@ -114,6 +118,7 @@ impl Config {
         self.links = links
             .map(|link| StoredLink {
                 mode: link.mode.as_str().to_string(),
+                reference: Some(link.reference().to_string()),
                 offsets: link.offsets().map(|(id, offset)| (id.clone(), offset)).collect(),
             })
             .collect();
@@ -125,7 +130,11 @@ mod tests {
     use super::*;
 
     fn link_of(pairs: &[(&str, i32)], mode: LinkMode) -> Link {
-        Link::from_parts(mode, pairs.iter().map(|(id, o)| ((*id).to_string(), *o)).collect())
+        Link::from_parts(
+            mode,
+            pairs.first().map(|(id, _)| (*id).to_string()),
+            pairs.iter().map(|(id, o)| ((*id).to_string(), *o)).collect(),
+        )
     }
 
     #[test]

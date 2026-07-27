@@ -76,6 +76,10 @@ enum Command {
     /// Gang lights so they move as one instrument, keeping their current
     /// brightness difference.
     Link {
+        /// Snap every lamp onto the first one instead of keeping the
+        /// differences. Destructive, which is why it is not the default.
+        #[arg(long)]
+        mirror: bool,
         #[arg(required = true, num_args = 1..)]
         selectors: Vec<String>,
     },
@@ -116,8 +120,9 @@ async fn main() -> Result<()> {
                 bail!("no light matches `{selector}`");
             }
         }
-        Command::Link { selectors } => {
+        Command::Link { mirror, selectors } => {
             let manager = ManagerProxy::new(&connection).await?;
+            let first = selectors.first().cloned().unwrap_or_default();
             // Several selectors gang what they collectively match, so both
             // `gaffer link left right` and `gaffer link key` read naturally.
             let members = manager
@@ -125,6 +130,11 @@ async fn main() -> Result<()> {
                 .await
                 .map_err(user_facing)
                 .context("asking the daemon to gang lights")?;
+            if mirror {
+                // Applied after ganging, so the gang's reference — the first
+                // selector — is the lamp everything snaps onto.
+                manager.set_link_mode(&first, "mirror").await.map_err(user_facing)?;
+            }
             println!("ganged {} lights: {}", members.len(), members.join(", "));
         }
         Command::Unlink { selector } => {

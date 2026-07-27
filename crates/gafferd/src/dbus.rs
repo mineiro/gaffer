@@ -57,8 +57,11 @@ pub enum Request {
     Rescan,
     /// Physically blink these lights.
     Identify(Vec<LightId>),
-    /// Gangs changed: persist them and announce the affected lights.
-    LinksChanged(Vec<LightId>),
+    /// Gangs changed: persist them and emit Manager1.Links.
+    ///
+    /// Carries no light ids, because ganging moves no lamp by itself. When a
+    /// mode change *does* move lamps, those travel as an ordinary `Applied`.
+    LinksChanged,
 }
 
 /// Object path for a light, derived from its hardware id.
@@ -288,7 +291,7 @@ impl Light1 {
         };
 
         announce(&self.requests, applied).await?;
-        send(&self.requests, Request::LinksChanged(vec![id.clone()])).await
+        send(&self.requests, Request::LinksChanged).await
     }
 
     /// Physically blink the light.
@@ -384,7 +387,7 @@ impl Manager1 {
             )));
         }
 
-        send(&self.requests, Request::LinksChanged(members.clone())).await?;
+        send(&self.requests, Request::LinksChanged).await?;
         Ok(members)
     }
 
@@ -402,13 +405,57 @@ impl Manager1 {
             affected
         };
 
-        send(&self.requests, Request::LinksChanged(affected.clone())).await?;
+        send(&self.requests, Request::LinksChanged).await?;
         Ok(affected)
+    }
+
+    /// Change how a gang tracks: `offset` or `mirror`.
+    ///
+    /// Mirroring is destructive — every member snaps onto the gang's reference,
+    /// the lamp named first when it was made — so it is a deliberate verb
+    /// rather than an argument on `Link`. It also matches the interaction: the
+    /// editor changes mode on a gang that already exists.
+    async fn set_link_mode(&self, selector: String, mode: String) -> fdo::Result<()> {
+        let mode = match mode.as_str() {
+            "mirror" => gaffer_core::LinkMode::Mirror,
+            "offset" => gaffer_core::LinkMode::Offset,
+            other => {
+                return Err(fdo::Error::InvalidArgs(format!(
+                    "unknown link mode `{other}`; expected `offset` or `mirror`"
+                )));
+            }
+        };
+
+        let applied = {
+            let mut world = self.world.write().await;
+            let group_before = GroupSnapshot::of(&world);
+
+            let matched = world.select(&Selector::parse(&selector));
+            let Some(id) = matched.first().cloned() else {
+                return Err(fdo::Error::InvalidArgs(format!("`{selector}` matched no light")));
+            };
+            if world.link_of(&id).is_none() {
+                return Err(fdo::Error::InvalidArgs(format!("`{selector}` is not in a gang")));
+            }
+
+            let changes = world.set_link_mode(&id, mode);
+            let group_after = GroupSnapshot::of(&world);
+            Request::Applied { changes, group_before, group_after }
+        };
+
+        announce(&self.requests, applied).await?;
+        send(&self.requests, Request::LinksChanged).await
     }
 
     /// The gangs, as member-id lists with each member's brightness offset.
     ///
     /// Shaped for a panel drawing wires: `(mode, [(id, offset)])`.
+    ///
+    /// **The first member is the gang's reference** — the lamp whose values win
+    /// a mirror, which is the one named first when the gang was made. Carrying
+    /// it by position rather than as a separate field keeps this property's
+    /// signature stable for clients already reading it, and matches the mental
+    /// model: `link a b` reads "link b onto a".
     #[zbus(property)]
     async fn links(&self) -> Vec<(String, Vec<(String, i32)>)> {
         self.world
@@ -416,7 +463,16 @@ impl Manager1 {
             .await
             .links()
             .map(|link| {
-                let members = link.offsets().map(|(id, o)| (id.clone(), o)).collect();
+                let reference = link.reference();
+                let mut members: Vec<(String, i32)> = Vec::with_capacity(link.len());
+                if let Some(offset) = link.offset_of(reference) {
+                    members.push((reference.to_string(), offset));
+                }
+                members.extend(
+                    link.offsets()
+                        .filter(|(id, _)| id.as_str() != reference)
+                        .map(|(id, o)| (id.clone(), o)),
+                );
                 (link.mode.as_str().to_string(), members)
             })
             .collect()
@@ -584,6 +640,22 @@ impl Publisher {
             iface.last_error_changed(emitter).await?;
         }
         Ok(())
+    }
+
+    /// Emit `PropertiesChanged` for `Manager1.Links`.
+    ///
+    /// The property is annotated `emits-change`, so a client is entitled to
+    /// watch it and never poll. It previously never fired, and clients were
+    /// left inferring a gang change from an unrelated burst of identity
+    /// properties — which gaffer should not have been emitting either.
+    pub async fn notify_links(&self) {
+        let Ok(iface_ref) =
+            self.connection.object_server().interface::<_, Manager1>(ROOT_PATH).await
+        else {
+            return;
+        };
+        let iface = iface_ref.get().await;
+        let _ = iface.links_changed(iface_ref.signal_emitter()).await;
     }
 
     /// Emit `PropertiesChanged` for the manager's counters.
