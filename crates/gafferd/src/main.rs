@@ -73,15 +73,22 @@ async fn main() -> Result<()> {
     init_tracing();
     info!(version = env!("CARGO_PKG_VERSION"), "gafferd starting");
 
-    // Gangs are user intent and outlive a restart; everything else about a
-    // light is re-discovered.
+    // Gangs and scenes are user intent and outlive a restart; everything else
+    // about a light is re-discovered.
     let mut initial = World::default();
     if let Some(path) = config::Config::path() {
-        let links = config::Config::load(&path).links();
-        if !links.is_empty() {
-            info!(count = links.len(), path = %path.display(), "restored gangs");
+        let config = config::Config::load(&path);
+        let (links, scenes) = (config.links(), config.scenes());
+        if !links.is_empty() || !scenes.is_empty() {
+            info!(
+                gangs = links.len(),
+                scenes = scenes.len(),
+                path = %path.display(),
+                "restored saved state"
+            );
         }
         initial.set_links(links);
+        initial.set_scenes(scenes);
     }
     let world = Arc::new(RwLock::new(initial));
     let (requests_tx, requests_rx) = mpsc::channel(64);

@@ -140,6 +140,29 @@ Gangs live in the daemon, so a compositor hotkey moves the pair with no panel
 running, and they survive a restart — they are stored in
 `~/.config/gaffer/config.toml`, which is meant to be readable.
 
+### Scenes
+
+```sh
+gaffer scene save "on camera"   # remember the whole desk under a name
+gaffer scene "on camera"        # put it back
+gaffer scene                    # list what you have saved
+gaffer scene rm "on camera"     # forget one
+```
+
+A scene remembers the desk as **gangs plus values**, not as a row of
+brightnesses. Restoring one brings back the instruments: the pair that was
+ganged is ganged again, with the spacing it had, so the next thing you do to it
+behaves the way you expect.
+
+Applying a scene only touches the lamps it names. A lamp you added since saving
+is left where it is — though if it was ganged to one the scene *does* name, it
+loses that partner, because the scene is authoritative about the gangs it
+describes. A lamp that is switched off or unplugged is not an error either: the
+rest of its gang re-forms without it, and its place is kept, so plugging it back
+in and re-applying restores the gang whole.
+
+Scenes are stored in the same `config.toml` as gangs.
+
 ### Hyprland
 
 ```conf
@@ -250,16 +273,14 @@ seams — but nothing beyond Elgato is implemented today.
 ## Status
 
 Working today, verified against real hardware: discovery, control, grouping,
-the D-Bus API, the CLI, and the Waybar module.
+gangs, scenes, the D-Bus API, the CLI, and the Waybar module.
 
 **Not implemented yet** — listed so nobody goes looking for them:
 
-- `gaffer scene "on camera"` — named scenes saved to TOML.
 - Camera-follow — turning the key lights on when the webcam goes live, via
   PipeWire. This is the feature that makes a daemon worth having over a script.
-- `gaffer link left right --offset` — a leader/follower relationship between
-  lights. Deferred because naive two-way linking oscillates; links have to be
-  directional and propagation has to be marked so it never round-trips.
+- A native panel. The D-Bus API is the interface; a GUI is a client like any
+  other, and none is bundled yet.
 
 ## Licence
 

@@ -129,13 +129,17 @@ impl Supervisor {
                 self.emit_group_diff(group_before, group_after).await;
             }
             Request::LinksChanged => {
-                self.save_links().await;
+                self.save_config().await;
                 // Exactly one thing changed, so exactly one signal. Ganging
                 // alters no light property and no counter: emitting `meta` per
                 // lamp claimed Name/Model/Firmware/Address had changed when
                 // they had not, and clients were forced to treat that false
                 // burst as the bell for a gang appearing.
                 self.publisher.notify_links().await;
+            }
+            Request::ScenesChanged => {
+                self.save_config().await;
+                self.publisher.notify_scenes().await;
             }
             Request::RefreshAll => self.refresh_all().await,
             Request::Rescan => {
@@ -382,11 +386,16 @@ impl Supervisor {
         }
     }
 
-    /// Persist the gangs. Failure is logged, never fatal: losing a link across
-    /// a restart is a nuisance, refusing to run is worse.
-    async fn save_links(&self) {
+    /// Persist user intent — gangs and scenes. Failure is logged, never fatal:
+    /// losing a link across a restart is a nuisance, refusing to run is worse.
+    ///
+    /// Both are written together even when only one changed. They live in one
+    /// file, and writing it means serialising the whole thing regardless; doing
+    /// it from a single place removes any chance of one path clobbering what
+    /// the other just saved.
+    async fn save_config(&self) {
         let Some(path) = Config::path() else {
-            warn!("no config directory; gangs will not survive a restart");
+            warn!("no config directory; gangs and scenes will not survive a restart");
             return;
         };
 
@@ -394,9 +403,10 @@ impl Supervisor {
         {
             let world = self.world.read().await;
             config.set_links(world.links());
+            config.set_scenes(world.scenes());
         }
         if let Err(error) = config.save(&path) {
-            warn!(path = %path.display(), error = %format!("{error:#}"), "could not save gangs");
+            warn!(path = %path.display(), error = %format!("{error:#}"), "could not save config");
         }
     }
 

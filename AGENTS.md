@@ -362,6 +362,61 @@ deliberately *not* expanded when the reconciler adopts hardware state: links
 propagate user intent, not observations, or a light changed from Elgato's own
 app would fight the 15 s refresh.
 
+## Scenes
+
+A scene is the whole desk, stored as **topology plus values**: each gang's
+members, mode, offsets and level, then whatever lamps are left over. Not a list
+of per-lamp brightnesses — that was the tempting shape, and it loses the
+instrument. Restore a value-only scene after alt-dragging a gang's spacing and
+you get the right numbers with the wrong relationship, so the next move on the
+fader goes somewhere unexpected.
+
+`gaffer_core::scene` is pure, like `link`. `Scene::capture` photographs, and
+`Scene::plan` works out what applying requires against the set of lamps that
+actually exist. `World::apply_scene` executes the plan in three phases, and the
+order is load-bearing:
+
+1. **Detach** every lamp the scene names, from whatever gang it is in now.
+2. **Form** the scene's gangs.
+3. **Drive values** — gangs through their level, loose lamps absolutely.
+
+Detaching everything first is what lets a scene rebuild a gang from lamps
+currently spread across two others, without any intermediate state mattering.
+
+Rules, all tested:
+
+- **A gang is captured when two or more of its members are in the capture set.**
+  Fewer, and the survivor is stored as a loose lamp.
+- **Unnamed lamps are never re-ganged and never moved.** A lamp ganged to one
+  the scene *does* name still loses that partner — that is topology, not value —
+  and the remnant dissolves below two members.
+- **Missing lamps are not an error.** A gang re-forms from whichever members are
+  present, and the absent one's offset is kept, so plugging it back in and
+  re-applying restores the gang whole.
+- **Levels are stored signed and unclamped.** A gang compressed against the end
+  of its travel has a level below zero; clamping it on the way to disk would
+  flatten the spacing on the way back.
+
+**Capture-then-apply is a no-op for values always, but for topology only when
+the capture set covered whole gangs.** Take a scene from `{A,B}` while the live
+gang is `{A,B,C}`: nothing moves value-wise, the pair `{A,B}` re-forms, and C is
+left loose because the remnant fell below two members. Correct under the rules
+above, but it means "a scene taken from a desk restores that desk" guarantees
+values, not topology. `capturing_a_whole_desk_and_applying_it_moves_nothing` and
+`capturing_part_of_a_gang_dissolves_it_on_apply` pin both halves.
+
+The API is whole-desk: `SaveScene(name)` and `ApplyScene(name)` take no
+selector, because a panel has no notion of a subset to pass. Saving or deleting
+emits `Manager1.Scenes`; *applying* emits an ordinary `Applied` plus
+`Manager1.Links`, because it moves lamps and rearranges gangs but does not
+change which scenes exist.
+
+Scene names are **rejected**, not sanitised, when they carry control characters
+— the opposite of `gaffer_core::text`, which cleans mDNS names. An mDNS name is
+attacker-supplied with nobody to complain to; a scene name was typed by a user
+who can be told, and silently storing something other than what they typed is
+its own bug.
+
 ## Security Model
 
 gaffer runs unprivileged in the user's session and holds no credentials. Two

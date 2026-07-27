@@ -331,8 +331,11 @@ mod tests {
         assert_eq!(scene.gangs[0].offsets["right"], -7);
     }
 
+    /// Values always round-trip. **Topology** round-trips only when the capture
+    /// set covered whole gangs — see the test below for what happens when it
+    /// did not.
     #[test]
-    fn a_scene_captured_and_replanned_is_stable() {
+    fn capturing_a_whole_desk_and_applying_it_moves_nothing() {
         let before = states(&[("left", 42), ("right", 35), ("mini", 64)]);
         let scene = Scene::capture(&before, &[keys_link()]);
         let plan = scene.plan(&present(&["left", "right", "mini"]));
@@ -367,5 +370,44 @@ mod tests {
         let gang = &scene.gangs[0];
         let resolved = gang.to_link().resolve_from_level(gang.level, gang.template());
         assert!(resolved.values().all(|s| !s.on && s.kelvin == 2900));
+    }
+
+    #[test]
+    fn capturing_part_of_a_gang_dissolves_it_on_apply() {
+        // The asterisk on the no-op above. A scene taken from {left, right}
+        // while the live gang is {left, right, mini} moves no values, but
+        // applying detaches the two named lamps and the remnant {mini} falls
+        // below two members, so the gang dissolves.
+        //
+        // Correct under the scoping rules — a scene cannot silently re-gang a
+        // lamp the user never put in it — but it means "captured from a desk"
+        // guarantees values, not topology.
+        let live = Link::learn(&[
+            ("left".to_string(), state(42)),
+            ("right".to_string(), state(35)),
+            ("mini".to_string(), state(20)),
+        ]);
+
+        // The capture set omits mini, so the gang is stored with the two
+        // members that were present — not all three.
+        let scene = Scene::capture(&states(&[("left", 42), ("right", 35)]), &[live]);
+        assert_eq!(scene.gangs.len(), 1);
+        assert_eq!(scene.gangs[0].members, vec!["left".to_string(), "right".to_string()]);
+        assert!(!scene.gangs[0].offsets.contains_key("mini"), "mini is not in the scene at all");
+
+        let plan = scene.plan(&present(&["left", "right", "mini"]));
+
+        // Applying detaches the two named lamps; the live remnant {mini} falls
+        // below two members, so that gang dissolves and mini ends up loose.
+        assert!(!plan.detach.contains(&"mini".to_string()), "mini is never named");
+        assert!(!plan.lamps.contains_key("mini"), "and mini is never moved");
+
+        // The captured pair re-forms exactly as stored.
+        assert_eq!(plan.form.len(), 1);
+        let gang = &plan.form[0];
+        assert_eq!(gang.members, vec!["left".to_string(), "right".to_string()]);
+        let resolved = gang.to_link().resolve_from_level(gang.level, gang.template());
+        assert_eq!(resolved["left"].brightness, 42);
+        assert_eq!(resolved["right"].brightness, 35);
     }
 }

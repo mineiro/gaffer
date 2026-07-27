@@ -62,6 +62,12 @@ pub enum Request {
     /// Carries no light ids, because ganging moves no lamp by itself. When a
     /// mode change *does* move lamps, those travel as an ordinary `Applied`.
     LinksChanged,
+    /// The set of saved scenes changed: persist it and emit Manager1.Scenes.
+    ///
+    /// Saving or deleting a scene moves no lamp. *Applying* one does, and that
+    /// travels as an ordinary `Applied` plus a `LinksChanged` — applying a
+    /// scene does not change which scenes exist.
+    ScenesChanged,
 }
 
 /// Object path for a light, derived from its hardware id.
@@ -69,6 +75,65 @@ pub fn light_path(id: &str) -> String {
     let element: String =
         id.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_uppercase()).collect();
     format!("{ROOT_PATH}/lights/{element}")
+}
+
+/// Longest scene name accepted. Generous for anything a person would type,
+/// and short enough that a client cannot quietly grow the config file.
+const MAX_SCENE_NAME: usize = 64;
+
+/// Validate and normalise a scene name at the one place names enter gaffer.
+///
+/// Control characters are refused rather than escaped at each display site.
+/// Scene names are echoed back by every client that lists them, including
+/// terminal ones, and a name carrying an ANSI escape would let whoever set it
+/// rewrite that output. Sanitising on the way out means every future client has
+/// to remember to; refusing on the way in means none of them do.
+///
+/// Deliberately *rejects* where [`gaffer_core::text`] cleans. Names arriving
+/// from mDNS are attacker-supplied with nobody to complain to, so they are
+/// stripped and kept. A scene name was typed by the user, who can be told — and
+/// silently storing something other than what they typed is its own bug.
+fn scene_name(raw: &str) -> fdo::Result<String> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(fdo::Error::InvalidArgs("a scene needs a name".into()));
+    }
+    if name.chars().count() > MAX_SCENE_NAME {
+        return Err(fdo::Error::InvalidArgs(format!(
+            "scene names are limited to {MAX_SCENE_NAME} characters"
+        )));
+    }
+    if let Some(bad) = name.chars().find(|c| c.is_control()) {
+        return Err(fdo::Error::InvalidArgs(format!(
+            "scene names cannot contain control characters (found U+{:04X})",
+            bad as u32
+        )));
+    }
+    Ok(name.to_string())
+}
+
+/// Ids matched by these selectors, in the order the caller named them.
+///
+/// Union, so both `link left right` and `link key` work, and deduplicated
+/// because two selectors may overlap.
+///
+/// **Order is the contract.** The first lamp is the gang's reference — `link a
+/// b` reads "link b onto a" — and it is what a later `SetLinkMode(mirror)`
+/// snaps everything else onto. An earlier version sorted here, which made the
+/// reference whichever member happened to have the lowest hardware id: `link
+/// left right` and `link right left` built the same gang, and mirroring then
+/// picked the wrong lamp. `World::link` preserves the order it is given, so
+/// this is the only place the intent can be lost.
+fn matched_in_order(world: &World, selectors: &[String]) -> Vec<String> {
+    let mut matched: Vec<String> = Vec::new();
+    for selector in selectors {
+        for id in world.select(&Selector::parse(selector)) {
+            if !matched.contains(&id) {
+                matched.push(id);
+            }
+        }
+    }
+    matched
 }
 
 /// Which light an interface object is a view of.
@@ -368,14 +433,7 @@ impl Manager1 {
     async fn link(&self, selectors: Vec<String>) -> fdo::Result<Vec<String>> {
         let members = {
             let mut world = self.world.write().await;
-            // Union of every selector, so `link left right` and `link key`
-            // both work. Deduplicated because two selectors may overlap.
-            let mut matched: Vec<String> = selectors
-                .iter()
-                .flat_map(|selector| world.select(&Selector::parse(selector)))
-                .collect();
-            matched.sort();
-            matched.dedup();
+            let matched = matched_in_order(&world, &selectors);
             world.link(&matched)
         };
 
@@ -493,6 +551,70 @@ impl Manager1 {
         world
             .link_level(id)
             .ok_or_else(|| fdo::Error::InvalidArgs(format!("`{selector}` is not in a gang")))
+    }
+
+    /// Photograph the whole desk and save it under `name`.
+    ///
+    /// Whole-desk on purpose, with no selector: a scene is "how my desk looks",
+    /// and the panel has no notion of a subset to pass. An existing scene of
+    /// the same name is replaced — re-saving is how you update one.
+    ///
+    /// What is stored is topology plus values: each gang's members, mode,
+    /// offsets and level, then whatever lamps are left over. Restoring
+    /// therefore brings back the *instrument*, not just a row of brightnesses.
+    async fn save_scene(&self, name: String) -> fdo::Result<()> {
+        let name = scene_name(&name)?;
+        self.world.write().await.save_scene(&name);
+        send(&self.requests, Request::ScenesChanged).await
+    }
+
+    /// Restore a saved scene.
+    ///
+    /// Every lamp the scene names is detached from its current gang, the
+    /// scene's gangs are formed, and then values are driven. Lamps the scene
+    /// does not name are never re-ganged and never moved — though one ganged to
+    /// a lamp the scene *does* name will lose that partner, and its gang
+    /// dissolves if fewer than two members remain.
+    ///
+    /// Missing lamps are not an error. A gang re-forms from whichever members
+    /// are present, and the absent one's offset is kept, so plugging it back in
+    /// and re-applying restores the gang whole.
+    async fn apply_scene(&self, name: String) -> fdo::Result<()> {
+        let name = scene_name(&name)?;
+
+        let applied = {
+            let mut world = self.world.write().await;
+            let Some(scene) = world.scene(&name).cloned() else {
+                return Err(fdo::Error::InvalidArgs(format!("no scene named `{name}`")));
+            };
+            let group_before = GroupSnapshot::of(&world);
+            let changes = world.apply_scene(&scene);
+            let group_after = GroupSnapshot::of(&world);
+            Request::Applied { changes, group_before, group_after }
+        };
+
+        announce(&self.requests, applied).await?;
+        // Applying rearranges gangs, so `Links` owes an emission — but the set
+        // of saved scenes is untouched, so `Scenes` does not.
+        send(&self.requests, Request::LinksChanged).await
+    }
+
+    /// Forget a saved scene.
+    async fn delete_scene(&self, name: String) -> fdo::Result<()> {
+        let name = scene_name(&name)?;
+        if !self.world.write().await.forget_scene(&name) {
+            return Err(fdo::Error::InvalidArgs(format!("no scene named `{name}`")));
+        }
+        send(&self.requests, Request::ScenesChanged).await
+    }
+
+    /// The names of the saved scenes, sorted.
+    ///
+    /// Names only: a scene's contents are gaffer's business, and a panel that
+    /// wants one applies it rather than rendering it.
+    #[zbus(property)]
+    async fn scenes(&self) -> Vec<String> {
+        self.world.read().await.scenes().keys().cloned().collect()
     }
 
     /// The gangs, as member-id lists with each member's brightness offset.
@@ -706,6 +828,17 @@ impl Publisher {
         let _ = iface.links_changed(iface_ref.signal_emitter()).await;
     }
 
+    /// Emit `PropertiesChanged` for `Manager1.Scenes`.
+    pub async fn notify_scenes(&self) {
+        let Ok(iface_ref) =
+            self.connection.object_server().interface::<_, Manager1>(ROOT_PATH).await
+        else {
+            return;
+        };
+        let iface = iface_ref.get().await;
+        let _ = iface.scenes_changed(iface_ref.signal_emitter()).await;
+    }
+
     /// Emit `PropertiesChanged` for the manager's counters.
     pub async fn notify_manager(&self) {
         let Ok(iface_ref) =
@@ -826,5 +959,69 @@ mod tests {
     #[test]
     fn a_light_path_never_collides_with_the_group() {
         assert_ne!(light_path("all"), GROUP_PATH);
+    }
+
+    /// A world whose lamp ids sort the *opposite* way to their names, so a
+    /// stray sort cannot pass by coincidence. Documentation MACs per RFC 7042.
+    fn two_lamps() -> World {
+        let mut world = World::default();
+        for (id, name) in [("00005E0053FF", "Key Light Left"), ("00005E005301", "Key Light Right")]
+        {
+            world.insert(crate::world::LightRecord {
+                id: id.to_string(),
+                fullname: format!("{name}._elg._tcp.local."),
+                name: name.to_string(),
+                model: String::new(),
+                firmware: String::new(),
+                endpoint: crate::world::Endpoint {
+                    addr: std::net::IpAddr::from([192, 0, 2, 10]),
+                    port: 9123,
+                },
+                desired: LightState { on: true, brightness: 40, kelvin: 4200 },
+                reported: None,
+                last_error: String::new(),
+                dirty_since: None,
+            });
+        }
+        world
+    }
+
+    #[test]
+    fn the_first_selector_names_the_gangs_reference() {
+        // `link left right` reads "link right onto left", so left leads —
+        // regardless of how the hardware ids happen to sort. Left's id is the
+        // *higher* of the two here, which is what a sort would get wrong.
+        let world = two_lamps();
+        let matched = matched_in_order(&world, &["left".to_string(), "right".to_string()]);
+        assert_eq!(matched, vec!["00005E0053FF".to_string(), "00005E005301".to_string()]);
+    }
+
+    #[test]
+    fn naming_the_lamps_the_other_way_round_builds_the_other_gang() {
+        // The two orders must be distinguishable — this is the whole point.
+        let world = two_lamps();
+        let matched = matched_in_order(&world, &["right".to_string(), "left".to_string()]);
+        assert_eq!(matched, vec!["00005E005301".to_string(), "00005E0053FF".to_string()]);
+    }
+
+    #[test]
+    fn overlapping_selectors_keep_the_first_mention() {
+        let world = two_lamps();
+        let matched =
+            matched_in_order(&world, &["left".to_string(), "key".to_string(), "left".to_string()]);
+        assert_eq!(matched.len(), 2, "no duplicates: {matched:?}");
+        assert_eq!(matched[0], "00005E0053FF", "and left still leads");
+    }
+
+    #[test]
+    fn a_scene_name_cannot_smuggle_a_terminal_escape() {
+        assert!(scene_name("studio\u{1b}[2Kfake").is_err());
+        assert!(scene_name("studio\ntwo").is_err());
+        assert!(scene_name("   ").is_err());
+        assert!(scene_name(&"x".repeat(MAX_SCENE_NAME + 1)).is_err());
+        // Surrounding whitespace is trimmed, not rejected.
+        assert_eq!(scene_name("  on camera  ").unwrap(), "on camera");
+        // Ordinary names with punctuation and non-ASCII are fine.
+        assert_eq!(scene_name("gravação — 2ª câmera").unwrap(), "gravação — 2ª câmera");
     }
 }

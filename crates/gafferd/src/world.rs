@@ -11,11 +11,11 @@
 //! The two converging is the reconciler's job. Them being briefly apart is
 //! normal; them never converging is how a vanished light is noticed.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::IpAddr;
 use std::time::Instant;
 
-use gaffer_core::{Adjust, LightState, Link, LinkMode, Power, Selector, StatePatch, group};
+use gaffer_core::{Adjust, LightState, Link, LinkMode, Power, Scene, Selector, StatePatch, group};
 
 /// Stable identity of a light — the `id=` field from its mDNS TXT record.
 pub type LightId = String;
@@ -167,6 +167,9 @@ pub struct World {
     /// Gangs. A lamp belongs to at most one, which is what lets the panel draw
     /// a single wire per port and a gang collapse into one card.
     links: Vec<Link>,
+    /// Saved scenes, by name. User intent like gangs, so they sit under the
+    /// same lock and are persisted by the same path.
+    scenes: BTreeMap<String, Scene>,
 }
 
 impl World {
@@ -359,6 +362,82 @@ impl World {
             .iter_mut()
             .find(|link| link.contains(id))
             .is_some_and(|link| link.relearn(id, brightness, &others))
+    }
+
+    /// Saved scenes, by name.
+    pub fn scenes(&self) -> &BTreeMap<String, Scene> {
+        &self.scenes
+    }
+
+    pub fn scene(&self, name: &str) -> Option<&Scene> {
+        self.scenes.get(name)
+    }
+
+    /// Save the whole desk under a name, replacing any scene already there.
+    pub fn save_scene(&mut self, name: &str) {
+        let scene = self.capture_scene();
+        self.scenes.insert(name.to_string(), scene);
+    }
+
+    /// Forget a scene. `false` if there was none by that name.
+    pub fn forget_scene(&mut self, name: &str) -> bool {
+        self.scenes.remove(name).is_some()
+    }
+
+    /// Replace the stored scenes wholesale, for restoring from config.
+    pub fn set_scenes(&mut self, scenes: BTreeMap<String, Scene>) {
+        self.scenes = scenes;
+    }
+
+    /// Photograph the whole desk: every lamp's desired state, and the gangs.
+    ///
+    /// Desired rather than reported, so a scene taken while a lamp is offline
+    /// records what the user asked for and not the last thing the hardware
+    /// managed to say.
+    pub fn capture_scene(&self) -> Scene {
+        let states: BTreeMap<String, LightState> =
+            self.lights.iter().map(|(id, light)| (id.clone(), light.desired)).collect();
+        Scene::capture(&states, &self.links)
+    }
+
+    /// Restore a scene: detach, form, then drive values.
+    ///
+    /// The order is load-bearing. Detaching every named lamp first means a
+    /// gang can be rebuilt from lamps that are currently spread across two
+    /// other gangs, without the intermediate states mattering. Values come last
+    /// so nothing is pushed through a link that is about to be replaced.
+    ///
+    /// Lamps the scene does not name are left entirely alone — not re-ganged,
+    /// not moved. A lamp *is* touched if it was ganged to one the scene names:
+    /// its gang loses that member, and dissolves if fewer than two remain. That
+    /// is a topology change, not a value change; the lamp keeps its brightness.
+    pub fn apply_scene(&mut self, scene: &Scene) -> Vec<(LightId, Changed)> {
+        let present: BTreeSet<String> = self.lights.keys().cloned().collect();
+        let plan = scene.plan(&present);
+
+        for id in &plan.detach {
+            self.unlink(id);
+        }
+        for gang in &plan.form {
+            self.links.push(gang.to_link());
+        }
+
+        // Gangs are driven by level rather than per-member brightness, so the
+        // stored offsets are reproduced exactly even where a member's value
+        // would clamp. Loose lamps carry absolute values already.
+        let now = Instant::now();
+        let values = plan
+            .form
+            .iter()
+            .flat_map(|gang| gang.to_link().resolve_from_level(gang.level, gang.template()))
+            .chain(plan.lamps.iter().map(|(id, next)| (id.clone(), *next)));
+
+        values
+            .filter_map(|(id, next)| {
+                let light = self.lights.get_mut(&id)?;
+                Some((id, light.set_desired(next, now)?))
+            })
+            .collect()
     }
 
     /// Apply a patch, returning the lights that now owe a push and what each
@@ -916,5 +995,120 @@ mod tests {
         assert_eq!(world.get("a").unwrap().desired.brightness, 55);
         assert_eq!(world.get("b").unwrap().desired.brightness, 75);
         assert_eq!(world.link_level("b"), Some(55), "readable from either member");
+    }
+
+    #[test]
+    fn a_scene_restores_both_the_values_and_the_gang() {
+        let mut world = world();
+        world.link(&["a".to_string(), "b".to_string()]);
+        let scene = world.capture_scene();
+
+        // Wreck it: pull the gang apart and move both lamps.
+        world.unlink("a");
+        world.apply(
+            &Target::Select(Selector::All),
+            &StatePatch { brightness: Some(Adjust::Set(5)), ..Default::default() },
+        );
+        assert!(world.link_of("a").is_none());
+
+        world.apply_scene(&scene);
+        assert_eq!(world.get("a").unwrap().desired.brightness, 40);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 60);
+        assert!(world.link_of("a").is_some(), "the gang is back");
+        assert_eq!(world.links().count(), 1, "and there is only one of it");
+    }
+
+    #[test]
+    fn a_scene_can_rebuild_a_gang_from_lamps_that_are_ganged_elsewhere() {
+        // Why detach runs before form: at capture time {a,b} were one gang,
+        // but by apply time a is ganged to c instead. Applying has to take a
+        // out of that gang before it can go back into this one.
+        let mut world = world();
+        world.insert(record(
+            "c",
+            "Mini",
+            LightState { on: true, brightness: 20, kelvin: 4000 },
+            true,
+        ));
+        world.link(&["a".to_string(), "b".to_string()]);
+        let scene = world.capture_scene();
+
+        world.unlink("a");
+        world.link(&["a".to_string(), "c".to_string()]);
+        world.apply_scene(&scene);
+
+        let gang = world.link_of("a").expect("a is ganged");
+        assert!(gang.contains("b"), "to b, as the scene says");
+        assert!(!gang.contains("c"), "and c has been let go");
+    }
+
+    #[test]
+    fn a_lamp_the_scene_never_names_keeps_its_brightness() {
+        // c is not in the scene. Applying may dissolve the gang it happens to
+        // be in — that is topology — but must not move it.
+        let mut world = world();
+        world.insert(record(
+            "c",
+            "Mini",
+            LightState { on: true, brightness: 20, kelvin: 4000 },
+            true,
+        ));
+        let scene = Scene::capture(
+            &BTreeMap::from([("a".to_string(), world.get("a").unwrap().desired)]),
+            &[],
+        );
+
+        world.link(&["a".to_string(), "c".to_string()]);
+        let touched = world.apply_scene(&scene);
+
+        assert!(!ids(&touched).contains(&"c".to_string()));
+        assert_eq!(world.get("c").unwrap().desired.brightness, 20);
+        assert!(world.link_of("c").is_none(), "though its gang is gone");
+    }
+
+    #[test]
+    fn a_scene_survives_a_lamp_being_absent_and_re_forms_when_it_returns() {
+        let mut world = world();
+        world.link(&["a".to_string(), "b".to_string()]);
+        let scene = world.capture_scene();
+
+        world.remove("b");
+        world.apply_scene(&scene);
+        assert!(world.link_of("a").is_none(), "one lamp cannot be a gang");
+        assert_eq!(world.get("a").unwrap().desired.brightness, 40, "but it still takes its value");
+
+        world.insert(record(
+            "b",
+            "Key Light Right",
+            LightState { on: false, brightness: 1, kelvin: 7000 },
+            true,
+        ));
+        world.apply_scene(&scene);
+        assert!(world.link_of("a").is_some_and(|gang| gang.contains("b")), "the gang re-forms");
+        assert_eq!(world.get("b").unwrap().desired.brightness, 60);
+    }
+
+    #[test]
+    fn applying_a_scene_twice_changes_nothing_the_second_time() {
+        let mut world = world();
+        world.link(&["a".to_string(), "b".to_string()]);
+        let scene = world.capture_scene();
+        world.apply(
+            &Target::Select(Selector::All),
+            &StatePatch { brightness: Some(Adjust::Set(5)), ..Default::default() },
+        );
+
+        assert!(
+            world.apply_scene(&scene).iter().any(|(_, changed)| changed.any()),
+            "the first apply moves lamps"
+        );
+        // The second still owes hardware a corrective push — `reported` only
+        // converges once the reconciler runs — but nothing a client can see has
+        // moved, so every reported change is empty.
+        assert!(
+            world.apply_scene(&scene).iter().all(|(_, changed)| !changed.any()),
+            "the second changes nothing observable"
+        );
+        assert_eq!(world.links().count(), 1, "and does not stack a duplicate gang");
     }
 }

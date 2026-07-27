@@ -43,6 +43,20 @@ pub trait Manager {
     /// Change how a gang tracks: `offset` or `mirror`.
     fn set_link_mode(&self, selector: &str, mode: &str) -> zbus::Result<()>;
 
+    /// Photograph the whole desk and save it under `name`, replacing any
+    /// scene already there.
+    fn save_scene(&self, name: &str) -> zbus::Result<()>;
+
+    /// Restore a saved scene.
+    fn apply_scene(&self, name: &str) -> zbus::Result<()>;
+
+    /// Forget a saved scene.
+    fn delete_scene(&self, name: &str) -> zbus::Result<()>;
+
+    /// The names of the saved scenes, sorted.
+    #[zbus(property)]
+    fn scenes(&self) -> zbus::Result<Vec<String>>;
+
     /// Gangs as `(mode, [(light id, brightness offset)])`.
     #[zbus(property)]
     fn links(&self) -> zbus::Result<Vec<(String, Vec<(String, i32)>)>>;

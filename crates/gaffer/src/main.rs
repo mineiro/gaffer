@@ -85,6 +85,24 @@ enum Command {
     },
     /// Break the gang a light belongs to.
     Unlink { selector: Option<String> },
+    /// Save, restore and list whole-desk scenes.
+    ///
+    /// A scene remembers the whole desk — every lamp's values, and the gangs
+    /// with their spacing — so restoring one brings back the instruments and
+    /// not just a row of brightnesses.
+    ///
+    ///   gaffer scene                 list saved scenes
+    ///   gaffer scene keys            restore the scene named `keys`
+    ///   gaffer scene save keys       save the desk as `keys`
+    ///   gaffer scene rm keys         forget it
+    ///
+    /// The verbs win over a bare name, so a scene called `save` needs the long
+    /// form: `gaffer scene apply save`.
+    #[command(verbatim_doc_comment)]
+    Scene {
+        #[arg(num_args = 0.., value_name = "ARGS")]
+        args: Vec<String>,
+    },
     /// Re-probe the network now.
     Rescan,
     /// Stream state changes until interrupted.
@@ -146,11 +164,57 @@ async fn main() -> Result<()> {
             }
             println!("unganged {} lights", affected.len());
         }
+        Command::Scene { args } => scene(&connection, &args).await?,
         Command::Rescan => {
             let manager = ManagerProxy::new(&connection).await?;
             manager.rescan().await.context("asking the daemon to rescan")?;
         }
         Command::Watch { waybar } => watch(&connection, waybar).await?,
+    }
+
+    Ok(())
+}
+
+/// Dispatch `gaffer scene ...`.
+///
+/// Hand-parsed rather than a clap subcommand enum so that `gaffer scene keys`
+/// restores a scene directly, which is the common case and the shape the tool
+/// was designed around. The cost is that a scene whose name collides with a
+/// verb needs the explicit `apply` form, which the help says.
+async fn scene(connection: &zbus::Connection, args: &[String]) -> Result<()> {
+    let manager = ManagerProxy::new(connection).await?;
+    let verb = args.first().map(String::as_str);
+    let rest = args.get(1..).unwrap_or_default();
+
+    match (verb, rest) {
+        (None, _) => {
+            let scenes = manager.scenes().await.context("reading the saved scenes")?;
+            if scenes.is_empty() {
+                // To stderr, so `gaffer scene | wc -l` still answers zero.
+                eprintln!("no scenes saved yet — `gaffer scene save <name>` makes one");
+            }
+            for name in scenes {
+                println!("{name}");
+            }
+        }
+        (Some("save"), [name]) => {
+            manager.save_scene(name).await.map_err(user_facing)?;
+            println!("saved scene `{name}`");
+        }
+        (Some("rm" | "delete" | "forget"), [name]) => {
+            manager.delete_scene(name).await.map_err(user_facing)?;
+            println!("forgot scene `{name}`");
+        }
+        (Some("apply"), [name]) => {
+            manager.apply_scene(name).await.map_err(user_facing)?;
+        }
+        (Some(name), []) => {
+            manager.apply_scene(name).await.map_err(user_facing)?;
+        }
+        (Some(verb @ ("save" | "rm" | "delete" | "forget" | "apply")), _) => {
+            bail!("`gaffer scene {verb}` takes exactly one name");
+        }
+        (Some(_), _) => bail!("too many arguments; try `gaffer scene --help`"),
     }
 
     Ok(())

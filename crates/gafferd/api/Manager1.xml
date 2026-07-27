@@ -30,8 +30,18 @@
 <arg name="selector" type="s" direction="in"/>
 <arg type="i" direction="out"/>
 </method>
+<method name="SaveScene">
+<arg name="name" type="s" direction="in"/>
+</method>
+<method name="ApplyScene">
+<arg name="name" type="s" direction="in"/>
+</method>
+<method name="DeleteScene">
+<arg name="name" type="s" direction="in"/>
+</method>
 <property name="LightCount" type="u" access="read"/>
 <property name="Links" type="a(sa(si))" access="read"/>
 <property name="OnlineCount" type="u" access="read"/>
+<property name="Scenes" type="as" access="read"/>
 <property name="Version" type="s" access="read"/>
 </interface>
