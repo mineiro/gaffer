@@ -199,16 +199,44 @@ impl Link {
         let Some(mover_offset) = self.offset_of(mover) else {
             return BTreeMap::new();
         };
-        let level = i32::from(next.brightness) - mover_offset;
+        self.resolve_from_level(i32::from(next.brightness) - mover_offset, next)
+    }
 
+    /// What every member becomes when the gang is set to `level`.
+    ///
+    /// The level is the gang's position as a single fader, and it is the
+    /// honest way to drive one. Going through a member instead requires
+    /// knowing that member's offset, and the obvious shortcut — "write through
+    /// whichever member sits at zero" — is wrong: `relearn` can move every
+    /// offset off zero, which two alt-drags routinely do. A gang at −7/+8 has
+    /// no member at the level, so a fader driven that way lands somewhere else
+    /// and springs back.
+    ///
+    /// `template` supplies temperature and power, which mirror across the gang;
+    /// only brightness takes the offset. The level itself is deliberately
+    /// unclamped — see the note on this type.
+    pub fn resolve_from_level(
+        &self,
+        level: i32,
+        template: LightState,
+    ) -> BTreeMap<String, LightState> {
         self.offsets
             .iter()
             .map(|(id, offset)| {
                 let brightness = (level + offset).clamp(0, i32::from(MAX_BRIGHTNESS)) as u8;
-                // Temperature and power mirror; only brightness carries an offset.
-                (id.clone(), LightState { brightness, ..next })
+                (id.clone(), LightState { brightness, ..template })
             })
             .collect()
+    }
+
+    /// The gang's current level, derived from any member present in `states`.
+    ///
+    /// `level == brightness_i - offset_i` for every member, so any one of them
+    /// answers. Returns `None` only when no member is present at all.
+    pub fn level(&self, states: &BTreeMap<String, LightState>) -> Option<i32> {
+        self.offsets
+            .iter()
+            .find_map(|(id, offset)| states.get(id).map(|s| i32::from(s.brightness) - offset))
     }
 
     /// Re-learn one member's offset after it was adjusted on its own.
@@ -476,5 +504,67 @@ mod tests {
 
         let no_reference = Link::from_parts(LinkMode::Offset, None, offsets);
         assert!(no_reference.contains(no_reference.reference()));
+    }
+
+    #[test]
+    fn a_gang_can_be_driven_by_its_level_with_no_member_at_zero() {
+        // The client-reported case: two alt-drags leave nobody at offset zero,
+        // so "write through the member nearest zero" lands somewhere else.
+        let mut link = keys();
+        link.relearn("left", 50, &states(&[("right", 35)])); // left +15
+        link.relearn("right", 28, &states(&[("left", 50)])); // right -7 from level 35
+        assert!(link.offsets().all(|(_, o)| o != 0), "the setup needs nobody at zero");
+
+        let resolved = link.resolve_from_level(40, state(0, 4200));
+        let level_of_left =
+            i32::from(resolved["left"].brightness) - link.offset_of("left").unwrap();
+        let level_of_right =
+            i32::from(resolved["right"].brightness) - link.offset_of("right").unwrap();
+        assert_eq!(level_of_left, 40);
+        assert_eq!(level_of_right, 40, "every member must sit at the requested level");
+    }
+
+    #[test]
+    fn driving_by_level_agrees_with_driving_by_a_member() {
+        let link = keys();
+        let by_member = link.resolve("right", state(53, 4200));
+        // right carries -7, so the same move as a level is 60.
+        let by_level = link.resolve_from_level(60, state(0, 4200));
+        assert_eq!(by_member, by_level);
+    }
+
+    #[test]
+    fn the_level_reads_back_the_same_from_any_member() {
+        let link = keys();
+        let now = states(&[("left", 60), ("right", 53)]);
+        assert_eq!(link.level(&now), Some(60));
+
+        // Only the follower present: the level is still recoverable.
+        assert_eq!(link.level(&states(&[("right", 53)])), Some(60));
+        assert_eq!(link.level(&BTreeMap::new()), None);
+    }
+
+    #[test]
+    fn a_level_read_back_and_rewritten_is_a_no_op() {
+        let link = keys();
+        let now = states(&[("left", 60), ("right", 53)]);
+        let level = link.level(&now).unwrap();
+        let resolved = link.resolve_from_level(level, state(0, 4200));
+        assert_eq!(resolved["left"].brightness, 60);
+        assert_eq!(resolved["right"].brightness, 53);
+    }
+
+    #[test]
+    fn dropping_a_member_needs_no_re_basing() {
+        // Offsets are against a notional level, so the survivors' brightness is
+        // untouched by a member leaving — the clause scene-apply leans on.
+        let mut link = Link::learn(&ordered(&[("a", 42), ("c", 35), ("d", 20)]));
+        let before = link.resolve_from_level(42, state(0, 4200));
+        link.remove("a");
+        let after = link.resolve_from_level(42, state(0, 4200));
+
+        for member in ["c", "d"] {
+            assert_eq!(before[member].brightness, after[member].brightness, "{member} moved");
+        }
     }
 }

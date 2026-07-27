@@ -281,6 +281,42 @@ impl World {
         self.links = links;
     }
 
+    /// Drive a lamp's gang by its level — the gang's position as one fader.
+    ///
+    /// The honest way to move a gang from a single control. Writing a member's
+    /// brightness instead requires knowing that member's offset, and there may
+    /// be no member sitting at the level at all once alt-drags have moved the
+    /// offsets around.
+    pub fn set_link_level(&mut self, id: &str, level: i32) -> Vec<(LightId, Changed)> {
+        let states: BTreeMap<String, LightState> =
+            self.lights.iter().map(|(id, light)| (id.clone(), light.desired)).collect();
+
+        let Some(link) = self.links.iter().find(|link| link.contains(id)) else {
+            return Vec::new();
+        };
+        // Temperature and power mirror, so any member supplies them.
+        let Some(template) = link.members().find_map(|m| states.get(m)).copied() else {
+            return Vec::new();
+        };
+
+        let now = Instant::now();
+        let resolved = link.resolve_from_level(level, template);
+        resolved
+            .into_iter()
+            .filter_map(|(id, next)| {
+                let light = self.lights.get_mut(&id)?;
+                Some((id, light.set_desired(next, now)?))
+            })
+            .collect()
+    }
+
+    /// A lamp's gang level, if it is ganged.
+    pub fn link_level(&self, id: &str) -> Option<i32> {
+        let states: BTreeMap<String, LightState> =
+            self.lights.iter().map(|(id, light)| (id.clone(), light.desired)).collect();
+        self.link_of(id)?.level(&states)
+    }
+
     /// Change how a lamp's gang tracks.
     ///
     /// Mirroring is destructive — every member snaps onto the gang's reference,
@@ -811,5 +847,74 @@ mod tests {
 
         assert_eq!(world.get("a").unwrap().desired.brightness, 50);
         assert_eq!(world.get("b").unwrap().desired.brightness, 70);
+    }
+
+    #[test]
+    fn leaving_a_gang_moves_no_lamp() {
+        // Scene apply leans on this: removing a named lamp from a gang must
+        // never disturb anyone's brightness, only the topology.
+        let mut world = world();
+        world.insert(record(
+            "c",
+            "Mini",
+            LightState { on: true, brightness: 10, kelvin: 4000 },
+            true,
+        ));
+        world.link(&["a".into(), "b".into(), "c".into()]);
+
+        let before: Vec<LightState> =
+            ["a", "b", "c"].iter().map(|id| world.get(id).unwrap().desired).collect();
+
+        world.unlink("a");
+
+        let after: Vec<LightState> =
+            ["a", "b", "c"].iter().map(|id| world.get(id).unwrap().desired).collect();
+        assert_eq!(before, after, "unlinking must not move values");
+    }
+
+    #[test]
+    fn a_remnant_of_two_or_more_survives_one_member_leaving() {
+        let mut world = world();
+        world.insert(record(
+            "c",
+            "Mini",
+            LightState { on: true, brightness: 10, kelvin: 4000 },
+            true,
+        ));
+        world.link(&["a".into(), "b".into(), "c".into()]);
+
+        world.unlink("a");
+
+        assert!(world.link_of("a").is_none(), "the named lamp leaves");
+        assert!(world.link_of("b").is_some(), "the remnant survives");
+        assert!(world.link_of("c").is_some());
+        assert_eq!(world.link_of("b").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn a_gang_survives_a_member_disappearing_and_resumes_when_it_returns() {
+        // Scene apply relies on stored offsets outliving an absent lamp.
+        let mut world = world();
+        world.link(&["a".into(), "b".into()]); // b rides +20
+
+        let vanished = world.remove("b").expect("b was present");
+        assert!(world.link_of("a").is_some(), "the gang outlives the missing member");
+
+        world.insert(vanished);
+        let patch = StatePatch { brightness: Some(Adjust::Set(50)), ..StatePatch::EMPTY };
+        world.apply(&Target::Id("a".into()), &patch);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 70, "the offset survived");
+    }
+
+    #[test]
+    fn a_gang_can_be_driven_by_its_level() {
+        let mut world = world(); // a=40, b=60 -> b rides +20
+        world.link(&["a".into(), "b".into()]);
+        assert_eq!(world.link_level("a"), Some(40));
+
+        world.set_link_level("a", 55);
+        assert_eq!(world.get("a").unwrap().desired.brightness, 55);
+        assert_eq!(world.get("b").unwrap().desired.brightness, 75);
+        assert_eq!(world.link_level("b"), Some(55), "readable from either member");
     }
 }

@@ -310,6 +310,21 @@ Rules the design fixes, all of them tested:
   in each gang's list is the reference, which keeps that property's signature
   stable for clients already reading it.
 
+**Drive a gang by its level, not through a member.** `level == brightness_i -
+offset_i` for every member, and `Link::resolve_from_level` is the honest way to
+move one from a single fader. The tempting shortcut — write through whichever
+member sits at offset zero — is wrong: `relearn` moves offsets, and two
+alt-drags routinely leave nobody at zero, so a fader driven that way lands
+elsewhere and springs back. `Manager1.SetLinkLevel`/`LinkLevel` expose both
+directions deliberately; a level you can write but must reconstruct to read
+invites exactly that bug.
+
+**Leaving a gang never moves a lamp.** Offsets are stored against a notional
+level, so dropping a member needs no re-basing. A named lamp leaves; the remnant
+survives at two or more members and dissolves otherwise; unnamed lamps are never
+re-ganged and never moved. Scene apply leans on this, and
+`leaving_a_gang_moves_no_lamp` pins it.
+
 Signalling rule: **emit exactly what changed.** Ganging alters no light property
 and no counter, so `Request::LinksChanged` emits `Manager1.Links` and nothing
 else. An earlier version emitted `meta` per lamp — claiming Name, Model,

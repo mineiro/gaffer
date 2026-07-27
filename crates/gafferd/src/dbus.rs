@@ -447,6 +447,54 @@ impl Manager1 {
         send(&self.requests, Request::LinksChanged).await
     }
 
+    /// Set a gang's level — its position as one fader.
+    ///
+    /// Prefer this to writing a member's `Brightness` when driving a gang from
+    /// a single control. Going through a member requires knowing its offset,
+    /// and after alt-drags there may be no member at the level at all, so a
+    /// fader driven that way lands elsewhere and springs back.
+    ///
+    /// The level may fall outside 0–100: members clamp individually, so a gang
+    /// compresses at the ends and recovers its spacing coming back.
+    async fn set_link_level(&self, selector: String, level: i32) -> fdo::Result<()> {
+        let applied = {
+            let mut world = self.world.write().await;
+            let group_before = GroupSnapshot::of(&world);
+
+            let matched = world.select(&Selector::parse(&selector));
+            let Some(id) = matched.first().cloned() else {
+                return Err(fdo::Error::InvalidArgs(format!("`{selector}` matched no light")));
+            };
+            if world.link_of(&id).is_none() {
+                return Err(fdo::Error::InvalidArgs(format!("`{selector}` is not in a gang")));
+            }
+
+            let changes = world.set_link_level(&id, level);
+            let group_after = GroupSnapshot::of(&world);
+            Request::Applied { changes, group_before, group_after }
+        };
+
+        announce(&self.requests, applied).await
+    }
+
+    /// A gang's current level.
+    ///
+    /// The counterpart to `SetLinkLevel`. Offered rather than left to be
+    /// reconstructed from `Links` and a member's `Brightness`, because the
+    /// obvious reconstruction — read through the member at offset zero — is
+    /// wrong once alt-drags have moved every offset off zero, and a write-only
+    /// level invites exactly that mistake.
+    async fn link_level(&self, selector: String) -> fdo::Result<i32> {
+        let world = self.world.read().await;
+        let matched = world.select(&Selector::parse(&selector));
+        let Some(id) = matched.first() else {
+            return Err(fdo::Error::InvalidArgs(format!("`{selector}` matched no light")));
+        };
+        world
+            .link_level(id)
+            .ok_or_else(|| fdo::Error::InvalidArgs(format!("`{selector}` is not in a gang")))
+    }
+
     /// The gangs, as member-id lists with each member's brightness offset.
     ///
     /// Shaped for a panel drawing wires: `(mode, [(id, offset)])`.
