@@ -290,9 +290,23 @@ cargo build --workspace          # refreshes Cargo.lock
 # 3. Rehearse the notes before the tag exists.
 .github/release-notes.sh 0.3.0
 # 4. Commit, tag, push. Either order.
-git tag -a v0.3.0 -m "gaffer 0.3.0"
+git tag -s v0.3.0 -m "gaffer 0.3.0"
 git push origin main && git push origin v0.3.0
 ```
+
+**`git tag -s`, not `-a`.** A ruleset on `v*` requires signatures, so an
+unsigned tag is rejected at push time. `commit.gpgsign` is on but `tag.gpgsign`
+is not, so `-a` produces an unsigned tag and the failure lands after the version
+bump is already committed. `git config --global tag.gpgsign true` removes the
+footgun; v0.2.0 predates the rule and stays unsigned.
+
+**A pushed tag cannot be moved or deleted.** The same ruleset blocks updates and
+deletions, which is a deliberate trade: this repository moved `v0.2.0` twice in
+one afternoon while getting the release process right, and each move silently
+demoted its GitHub release to a draft. The cost is that a botched release is now
+fixed by releasing again, not by re-cutting the tag — so the pre-flight checks
+above matter more, and `.github/release-notes.sh` exists to be run *before* the
+tag is created.
 
 The release workflow re-runs fmt, clippy and the tests against the tagged tree —
 a tag can point at a commit that never passed CI on main, and a release should

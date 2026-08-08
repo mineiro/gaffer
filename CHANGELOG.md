@@ -18,6 +18,8 @@ change is additive, and so far all of them have been.
 
 - Release process: pushing a `v*` tag publishes a GitHub release with notes from
   this file. Push order no longer matters.
+- Release tags are now signed and immutable. Cut them with `git tag -s`; an
+  unsigned tag is rejected at push time, and a pushed tag can no longer be moved.
 - **Fedora packaging moved to [mineiro/rpms](https://github.com/mineiro/rpms)**
   and the COPR project is now `mineiro/rpms`. Enable that instead of
   `mineiro/gaffer`; packages there are built from release tarballs rather than
