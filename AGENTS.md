@@ -197,40 +197,34 @@ Do not commit protocol code you cannot exercise against real hardware.
 
 ## Packaging
 
-Packaging lives in-tree, deliberately: it cannot drift out of lockstep with the
-code, and a Nix flake has to sit at the repo root anyway. If gaffer ever reaches
-official Fedora or Debian, those projects take packaging into their own dist-git
-and the split happens on its own.
+**Packaging is not in this repository.** Fedora packages live in
+[mineiro/rpms](https://github.com/mineiro/rpms) under `packages/gaffer`, built
+from the archive GitHub publishes for a tag. The Nix flake stays here, because a
+flake has to sit at the repo root and it builds from the working tree rather
+than from a release.
 
-- `gaffer.spec` — Fedora/COPR.
-- `.copr/Makefile` — COPR's "Make SRPM" entry point. This is the only build
-  stage with network access, so it is where `cargo vendor` runs; the RPM build
-  itself is offline, as Fedora requires.
+It moved because a source repository has commits that are not releases, so its
+packaging needs a scheme to tell the two apart — and that scheme ended up wired
+into a webhook racing a git push. It produced two artefacts that claimed to be
+releases and were not. A repository that only ever packages releases has no such
+scheme and nothing to race.
 
-**Pushing to `main` builds a package.** A GitHub webhook posts to COPR, which
-rebuilds all six chroots — roughly seven minutes, including for docs-only
-commits. Note that `copr-cli add-package-scm --webhook-rebuild on` only makes
-COPR *accept* such a request; the webhook on the GitHub side is what sends it,
-and the two are configured separately. If pushes stop producing builds, check
-the delivery log under the repository's webhook settings before suspecting the
-spec.
-
-The webhook deliberately carries its token in the URL path, which is how COPR
-authenticates it; GitHub's separate "Secret" field must be left empty, since
-COPR does not verify the `X-Hub-Signature-256` header that field produces.
-
-Four things that will silently break a package if changed carelessly:
+What that leaves here is an **interface** the packaging depends on. Four things
+will silently break a package if changed carelessly:
 
 - **`make install` must stay `DESTDIR`-safe.** No `systemctl`, no writes outside
   `$(DESTDIR)`, and no dependency on `build` — packagers compile separately with
   their own flags.
 - **`@BINDIR@` substitutes `$(BINDIR)`, never `$(DESTDIR)$(BINDIR)`.** Baking the
   staging root into a unit file ships a service pointing at a build-machine path.
-- **`ARTIFACTDIR` exists because `%cargo_build` emits to `target/rpm`,** not
-  `target/release`. The spec overrides it.
-- **The `License:` field covers the whole statically-linked tree,** not just
-  gaffer. It is not auto-generated — after any dependency change, check it
-  against `%{cargo_license_summary}` in the build log.
+- **`GAFFER_BUILD_ID`** is read by `crates/gafferd/build.rs` and set by the spec
+  to the full NVR. Renaming it does not fail a build; it silently degrades
+  `Manager1.BuildId` to a git hash or `unknown`.
+- **The licence surface.** A dependency change can change the effective licence
+  of the statically linked binary, and the `License:` field asserting it lives
+  downstream now. Anything that adds a dependency with an unusual licence needs
+  saying out loud, because the person who has to correct the spec is not
+  reading this diff.
 
 Units install to `%{_userunitdir}` (`/usr/lib/systemd/user`), not the system
 unit directory. gaffer is per-session and D-Bus activated; it must never be
@@ -283,60 +277,39 @@ missing.
 
 ## Cutting a Release
 
-The **tag is the release event**. `CHANGELOG.md` is the canonical record; the
-`%changelog` in `gaffer.spec` is a derived summary, and the GitHub release notes
-are generated from the matching section — so a change gets written down once.
+The **tag is the release event**. `CHANGELOG.md` is the canonical record and the
+GitHub release notes are generated from the matching section, so a change gets
+written down once. Downstream packaging keeps its own `%changelog` about
+packaging changes, which is a different subject and stays there.
 
 ```sh
 # 1. Write the entry under a new heading in CHANGELOG.md.
-# 2. Bump the version in all three places that carry it.
-$EDITOR Cargo.toml gaffer.spec nix/package.nix
+# 2. Bump the version in both places that carry it.
+$EDITOR Cargo.toml nix/package.nix
 cargo build --workspace          # refreshes Cargo.lock
 # 3. Rehearse the notes before the tag exists.
 .github/release-notes.sh 0.3.0
-# 4. Commit and tag.
+# 4. Commit, tag, push. Either order.
 git tag -a v0.3.0 -m "gaffer 0.3.0"
-# 5. Push the TAG FIRST, then the branch. See below — the order matters.
-git push origin v0.3.0 && git push origin main
+git push origin main && git push origin v0.3.0
 ```
 
-**Push the tag before the branch.** COPR builds on the branch webhook, and
-`snaprel.sh` asks whether a tag points at the commit it is building. Push the
-branch first and COPR clones before the tag exists, so the release builds as a
-snapshot — which is what happened to 0.2.0, and needs a manual rebuild in COPR
-to correct. The GitHub release workflow triggers on the tag and does not care
-about the order.
+The release workflow re-runs fmt, clippy and the tests against the tagged tree —
+a tag can point at a commit that never passed CI on main, and a release should
+have been tested exactly as tagged — checks the tag agrees with `Cargo.toml` and
+`nix/package.nix`, and publishes. A version bumped in one file but not the other
+fails the job rather than shipping something whose version contradicts its name.
 
-The release workflow refuses to publish a tag whose tree does not produce `1`,
-so a tag cut at the wrong commit fails loudly instead of shipping a snapshot
-wearing a release's name. That check exists because it happened: v0.2.0 was
-first tagged at a commit whose `snaprel.sh` predated the tag check, and nothing
-noticed until the built package was inspected.
+Order does not matter any more. Packaging used to build off the branch webhook,
+so pushing the branch before the tag raced it and shipped the release as a
+snapshot; with packaging downstream there is nothing to race. The release
+workflow triggers on the tag alone.
 
-This ordering dependency is a wart, and it is COPR's, not gaffer's: nothing in
-the release itself depends on it. It disappears entirely if the Fedora packaging
-moves to its own repository, since that repository would build from the archive
-GitHub publishes for the tag rather than racing a webhook.
-
-The release workflow then re-runs fmt, clippy and the tests against the tagged
-tree — a tag can point at a commit that never passed CI on main, and a release
-should have been tested exactly as tagged — checks that the tag agrees with
-`Cargo.toml`, `gaffer.spec` and `nix/package.nix`, and publishes the release.
-A version bumped in two of the three files fails the job rather than shipping a
-package whose own version contradicts its name.
-
-`.copr/snaprel.sh` gives a tagged commit the release `1`, and every other commit
-`0.<timestamp>.git<sha>`. The leading zero makes snapshots sort *below* the
-release, so a tag supersedes everything that preceded it. `--exact-match` is
-load-bearing: only the commit the tag points at is a release, and the commit
-after it is a snapshot again. If tags are unavailable — COPR clones shallow — it
-falls back to a snapshot, which is the safe direction: a release built as a
-snapshot is fixed by rebuilding, while a snapshot built as `1` outranks the real
-release permanently.
-
-Packaging is downstream of the tag, not part of it. The RPM spec's `Source0`
-points at the archive GitHub generates for the tag, so the Fedora packaging
-could move to its own repository without changing how a release is cut.
+**Releasing does not produce an RPM.** It produces a tag and the archive GitHub
+builds from it. Getting that into COPR is a separate, deliberate step in
+[mineiro/rpms](https://github.com/mineiro/rpms): bump `Version:`, reset
+`Release:` to 1, and let its own checks run. A release that nobody packages is a
+perfectly valid state for this repository to be in.
 
 ## The D-Bus API is a Contract
 

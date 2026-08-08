@@ -30,22 +30,34 @@ gaffer owns the state once. Everything else is a thin client.
 ### Fedora
 
 ```sh
-sudo dnf copr enable mineiro/gaffer
+sudo dnf copr enable mineiro/rpms
 sudo dnf install gaffer
 ```
 
-Fedora 43, 44 and rawhide, on x86_64 and aarch64.
-
-Builds track `main`, and every commit produces a distinct version — so use
-`--refresh` when you upgrade:
+Fedora 43, 44 and rawhide, on x86_64 and aarch64. Packages track **releases**,
+and are built in [mineiro/rpms](https://github.com/mineiro/rpms) from the source
+archive of each tag.
 
 ```sh
 sudo dnf --refresh upgrade gaffer
 ```
 
-Without it dnf serves cached repository metadata, which for a repo that
-rebuilds on every push routinely means being told there is nothing to do while
-a newer build sits in the repo.
+`--refresh` because dnf serves cached repository metadata by default, so a new
+release can be reported as nothing to do for as long as that cache lives.
+
+**Upgrading does not restart the daemon.** RPM scriptlets run as root while
+gafferd runs in your session, so the new binary lands on disk while the old
+process keeps running:
+
+```sh
+systemctl --user restart gaffer.service
+```
+
+`gaffer` warns when it spots this, and `gaffer version` shows which build is
+actually running.
+
+If you enabled `mineiro/gaffer` before packaging moved out of this repository,
+disable it: `sudo dnf copr disable mineiro/gaffer`.
 
 ### NixOS
 

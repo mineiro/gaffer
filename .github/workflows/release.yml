@@ -1,9 +1,8 @@
 name: Release
 
-# Pushing a `v*` tag is the release event. Everything downstream keys off it:
-# GitHub publishes the source archive this workflow attaches notes to, the RPM
-# spec's Source0 points at that same archive, and COPR's snaprel.sh builds a
-# tagged commit as a plain `1` so it outranks every snapshot before it.
+# Pushing a `v*` tag is the release event, and the archive GitHub publishes for
+# it is what downstream packaging consumes — see github.com/mineiro/rpms. This
+# repository has no opinion about packaging beyond producing that archive.
 #
 # Deliberately not triggered by a GitHub Release created through the web UI:
 # the tag is the source of truth, so there is one way to cut a release and it
@@ -39,9 +38,6 @@ jobs:
           # `gh` is given a token explicitly below, so the checkout does not
           # need to leave one in .git/config where a build script could read it.
           persist-credentials: false
-          # Full history and tags: the snapshot-release check below asks git
-          # whether a tag points at HEAD, which a depth-1 checkout cannot answer.
-          fetch-depth: 0
 
       # A tag that disagrees with the tree is the classic half-finished
       # release: v0.3.0 pushed while Cargo.toml still says 0.2.0, shipping a
@@ -52,31 +48,13 @@ jobs:
           set -eu
           tag="${GITHUB_REF_NAME#v}"
           crate=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          spec=$(grep -m1 '^Version:' gaffer.spec | awk '{print $2}')
           nix=$(grep -m1 'version = ' nix/package.nix | cut -d'"' -f2)
 
-          echo "tag=$tag crate=$crate spec=$spec nix=$nix"
+          echo "tag=$tag crate=$crate nix=$nix"
           fail=0
           [ "$crate" = "$tag" ] || { echo "::error::Cargo.toml says $crate, tag says $tag"; fail=1; }
-          [ "$spec"  = "$tag" ] || { echo "::error::gaffer.spec says $spec, tag says $tag"; fail=1; }
           [ "$nix"   = "$tag" ] || { echo "::error::nix/package.nix says $nix, tag says $tag"; fail=1; }
           exit $fail
-
-      # A tagged tree must build as RPM release `1`, not a snapshot. This is
-      # checked because it has already gone wrong once: v0.2.0 was tagged at a
-      # commit whose snaprel.sh predated the tag check, so the release shipped
-      # as a snapshot and nothing noticed until the package was inspected. The
-      # tag is the only place this is knowable before the build happens.
-      - name: Check the tagged tree builds as a release
-        run: |
-          set -eu
-          rel=$(.copr/snaprel.sh)
-          echo "release string: $rel"
-          if [ "$rel" != "1" ]; then
-            echo "::error::snaprel.sh gives '$rel' at this tag; expected '1'."
-            echo "::error::The tagged commit is missing the tag check, or the tag is not annotated."
-            exit 1
-          fi
 
       - name: Install toolchain
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt

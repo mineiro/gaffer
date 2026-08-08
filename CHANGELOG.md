@@ -16,9 +16,12 @@ change is additive, and so far all of them have been.
 
 ### Changed
 
-- Release process: pushing a `v*` tag now publishes a GitHub release with notes
-  from this file, and a tagged commit builds as a real RPM release rather than a
-  snapshot. Push the tag before the branch — see `AGENTS.md`.
+- Release process: pushing a `v*` tag publishes a GitHub release with notes from
+  this file. Push order no longer matters.
+- **Fedora packaging moved to [mineiro/rpms](https://github.com/mineiro/rpms)**
+  and the COPR project is now `mineiro/rpms`. Enable that instead of
+  `mineiro/gaffer`; packages there are built from release tarballs rather than
+  from every commit. Nothing about gaffer itself changes.
 
 ## [0.2.0] — 2026-08-08
 

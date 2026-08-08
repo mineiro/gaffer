@@ -73,21 +73,3 @@ jobs:
 
       - name: Build
         run: cargo +1.88 build --workspace --locked
-
-  packaging:
-    name: spec lint
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Check out
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Install rpmlint
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpmlint
-
-      # Catches spec syntax and SPDX mistakes here rather than in a COPR build.
-      - name: Lint the RPM spec
-        run: rpmlint gaffer.spec
