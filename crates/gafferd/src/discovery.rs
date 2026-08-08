@@ -140,6 +140,18 @@ impl Discovery {
     ///
     /// The browse re-queries on its own schedule; this exists so `gaffer rescan`
     /// does something immediate rather than waiting for the next cycle.
+    ///
+    /// These fullnames came off the wire, so this hands attacker-influenced
+    /// text back to mdns-sd's packet *writer* — which is why the crate's
+    /// version floor is a hard requirement. Before 0.20.3 the writer asserted
+    /// that every label was under 64 bytes, and its decoder and encoder
+    /// disagreed about escaping: a received name was joined with `.` and
+    /// escaped nowhere, while the encoder split on unescaped dots only, so a
+    /// label ending in a backslash swallowed the following separator and the
+    /// two labels merged into one over-long one. A single advertisement could
+    /// therefore panic the responder thread on the next rescan and take
+    /// discovery down until a restart. 0.20.3 reports an error and skips the
+    /// offending record instead.
     pub fn verify(&self, fullnames: &[String]) {
         for fullname in fullnames {
             if let Err(error) = self.daemon.verify(fullname.clone(), VERIFY_TIMEOUT) {
