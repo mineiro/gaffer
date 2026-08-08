@@ -281,6 +281,57 @@ daemon instead of failing at the first call. `gaffer version` models this: it
 prints "daemon predates BuildId" rather than failing when the property is
 missing.
 
+## Cutting a Release
+
+The **tag is the release event**. `CHANGELOG.md` is the canonical record; the
+`%changelog` in `gaffer.spec` is a derived summary, and the GitHub release notes
+are generated from the matching section — so a change gets written down once.
+
+```sh
+# 1. Write the entry under a new heading in CHANGELOG.md.
+# 2. Bump the version in all three places that carry it.
+$EDITOR Cargo.toml gaffer.spec nix/package.nix
+cargo build --workspace          # refreshes Cargo.lock
+# 3. Rehearse the notes before the tag exists.
+.github/release-notes.sh 0.3.0
+# 4. Commit and tag.
+git tag -a v0.3.0 -m "gaffer 0.3.0"
+# 5. Push the TAG FIRST, then the branch. See below — the order matters.
+git push origin v0.3.0 && git push origin main
+```
+
+**Push the tag before the branch.** COPR builds on the branch webhook, and
+`snaprel.sh` asks whether a tag points at the commit it is building. Push the
+branch first and COPR clones before the tag exists, so the release builds as a
+snapshot — which is what happened to 0.2.0, and needs a manual rebuild in COPR
+to correct. The GitHub release workflow triggers on the tag and does not care
+about the order.
+
+This ordering dependency is a wart, and it is COPR's, not gaffer's: nothing in
+the release itself depends on it. It disappears entirely if the Fedora packaging
+moves to its own repository, since that repository would build from the archive
+GitHub publishes for the tag rather than racing a webhook.
+
+The release workflow then re-runs fmt, clippy and the tests against the tagged
+tree — a tag can point at a commit that never passed CI on main, and a release
+should have been tested exactly as tagged — checks that the tag agrees with
+`Cargo.toml`, `gaffer.spec` and `nix/package.nix`, and publishes the release.
+A version bumped in two of the three files fails the job rather than shipping a
+package whose own version contradicts its name.
+
+`.copr/snaprel.sh` gives a tagged commit the release `1`, and every other commit
+`0.<timestamp>.git<sha>`. The leading zero makes snapshots sort *below* the
+release, so a tag supersedes everything that preceded it. `--exact-match` is
+load-bearing: only the commit the tag points at is a release, and the commit
+after it is a snapshot again. If tags are unavailable — COPR clones shallow — it
+falls back to a snapshot, which is the safe direction: a release built as a
+snapshot is fixed by rebuilding, while a snapshot built as `1` outranks the real
+release permanently.
+
+Packaging is downstream of the tag, not part of it. The RPM spec's `Source0`
+points at the archive GitHub generates for the tag, so the Fedora packaging
+could move to its own repository without changing how a release is cut.
+
 ## The D-Bus API is a Contract
 
 `crates/gafferd/api/Light1.xml` and `Manager1.xml` are the published shape of

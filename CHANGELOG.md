@@ -14,6 +14,12 @@ change is additive, and so far all of them have been.
 
 ## [Unreleased]
 
+### Changed
+
+- Release process: pushing a `v*` tag now publishes a GitHub release with notes
+  from this file, and a tagged commit builds as a real RPM release rather than a
+  snapshot. Push the tag before the branch — see `AGENTS.md`.
+
 ## [0.2.0] — 2026-08-08
 
 ### Added
