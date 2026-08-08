@@ -1,9 +1,16 @@
 { lib, rustPlatform, src }:
 
+let
+  version = "0.2.0";
+in
 rustPlatform.buildRustPackage {
   pname = "gaffer";
-  version = "0.1.0";
-  inherit src;
+  inherit version src;
+
+  # A store path carries no git metadata, so the build script would otherwise
+  # bake in `unknown`. Manager1.BuildId exists to answer "which build is
+  # running?", and a Nix-built daemon should be able to answer it too.
+  env.GAFFER_BUILD_ID = "${version}-nix";
 
   # The lockfile is committed, so Nix reads it directly instead of needing a
   # cargoHash that has to be re-guessed on every dependency bump.

@@ -5,7 +5,7 @@
 #     0.<HEAD commit timestamp>.git<short sha>
 #
 # so that every commit produces a distinct NVR — dnf keys on NEVRA, and a
-# repository that rebuilds the same 0.1.0-1 forever looks frozen to clients.
+# repository that rebuilds the same 0.2.0-1 forever looks frozen to clients.
 #
 # The leading 0 is load-bearing: RPM compares release segment by segment, so
 # 0.<anything> sorts *below* a plain 1, and the first tagged release therefore
@@ -22,7 +22,7 @@
 %global snaprel 1
 
 Name:           gaffer
-Version:        0.1.0
+Version:        0.2.0
 Release:        %{snaprel}%{?dist}
 Summary:        Daemon and CLI for controlling Elgato Key Lights
 
@@ -120,5 +120,18 @@ export GAFFER_BUILD_ID="%{version}-%{release}"
 %{_datadir}/dbus-1/services/io.mineiro.gaffer.service
 
 %changelog
+* Sat Aug 08 2026 Jose Tiburcio Ribeiro Netto <jnetto@mineiro.io> - 0.2.0-1
+- Gangs: link lights so they move as one instrument, keeping the brightness
+  difference they had. Offset and mirror modes; the first lamp named leads.
+- Scenes: save and restore the whole desk, storing gangs and their spacing
+  rather than a flat list of brightnesses.
+- Manager1 gains Link, Unlink, SetLinkMode, SetLinkLevel, LinkLevel,
+  SaveScene, ApplyScene, DeleteScene, and the Links, Scenes and BuildId
+  properties. All additive; nothing existing changed shape.
+- BuildId and `gaffer version` report which build is actually running, and
+  the CLI warns when the daemon was upgraded but never restarted.
+- Require mdns-sd 0.20.3, which fixes a panic in the mDNS packet write path
+  reachable from a hostile advertisement on the local network.
+
 * Sat Jul 25 2026 Jose Tiburcio Ribeiro Netto <jnetto@mineiro.dev> - 0.1.0-1
 - Initial package
