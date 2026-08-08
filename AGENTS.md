@@ -307,6 +307,12 @@ snapshot — which is what happened to 0.2.0, and needs a manual rebuild in COPR
 to correct. The GitHub release workflow triggers on the tag and does not care
 about the order.
 
+The release workflow refuses to publish a tag whose tree does not produce `1`,
+so a tag cut at the wrong commit fails loudly instead of shipping a snapshot
+wearing a release's name. That check exists because it happened: v0.2.0 was
+first tagged at a commit whose `snaprel.sh` predated the tag check, and nothing
+noticed until the built package was inspected.
+
 This ordering dependency is a wart, and it is COPR's, not gaffer's: nothing in
 the release itself depends on it. It disappears entirely if the Fedora packaging
 moves to its own repository, since that repository would build from the archive

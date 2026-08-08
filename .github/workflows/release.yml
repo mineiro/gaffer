@@ -39,6 +39,9 @@ jobs:
           # `gh` is given a token explicitly below, so the checkout does not
           # need to leave one in .git/config where a build script could read it.
           persist-credentials: false
+          # Full history and tags: the snapshot-release check below asks git
+          # whether a tag points at HEAD, which a depth-1 checkout cannot answer.
+          fetch-depth: 0
 
       # A tag that disagrees with the tree is the classic half-finished
       # release: v0.3.0 pushed while Cargo.toml still says 0.2.0, shipping a
@@ -58,6 +61,22 @@ jobs:
           [ "$spec"  = "$tag" ] || { echo "::error::gaffer.spec says $spec, tag says $tag"; fail=1; }
           [ "$nix"   = "$tag" ] || { echo "::error::nix/package.nix says $nix, tag says $tag"; fail=1; }
           exit $fail
+
+      # A tagged tree must build as RPM release `1`, not a snapshot. This is
+      # checked because it has already gone wrong once: v0.2.0 was tagged at a
+      # commit whose snaprel.sh predated the tag check, so the release shipped
+      # as a snapshot and nothing noticed until the package was inspected. The
+      # tag is the only place this is knowable before the build happens.
+      - name: Check the tagged tree builds as a release
+        run: |
+          set -eu
+          rel=$(.copr/snaprel.sh)
+          echo "release string: $rel"
+          if [ "$rel" != "1" ]; then
+            echo "::error::snaprel.sh gives '$rel' at this tag; expected '1'."
+            echo "::error::The tagged commit is missing the tag check, or the tag is not annotated."
+            exit 1
+          fi
 
       - name: Install toolchain
         run: rustup toolchain install stable --profile minimal --component clippy,rustfmt
@@ -79,11 +98,25 @@ jobs:
 
       # `gh` rather than a third-party action: releasing is the one job with a
       # writable token, so it runs the least third-party code of anything here.
+      # Create, or update in place if the release already exists. A tag that
+      # has to be moved — because the first attempt was cut wrong — should
+      # re-run this cleanly rather than failing on "release already exists" and
+      # leaving a red run next to a green release.
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            --title "gaffer ${GITHUB_REF_NAME#v}" \
-            --notes-file "${RUNNER_TEMP}/notes.md" \
-            --verify-tag
+          set -eu
+          title="gaffer ${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release exists; updating it in place"
+            gh release edit "$GITHUB_REF_NAME" \
+              --title "$title" \
+              --notes-file "${RUNNER_TEMP}/notes.md" \
+              --verify-tag
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --title "$title" \
+              --notes-file "${RUNNER_TEMP}/notes.md" \
+              --verify-tag
+          fi
