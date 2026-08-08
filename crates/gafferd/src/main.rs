@@ -45,7 +45,9 @@ fn handled_trivial_args() -> bool {
     };
 
     match arg.as_str() {
-        "--version" | "-V" => println!("gafferd {}", env!("CARGO_PKG_VERSION")),
+        "--version" | "-V" => {
+            println!("gafferd {} ({})", env!("CARGO_PKG_VERSION"), env!("GAFFER_BUILD_ID"));
+        }
         "--help" | "-h" => println!(
             "gafferd {}\n\n\
              The gaffer daemon. Owns Elgato Key Light discovery and state, and\n\

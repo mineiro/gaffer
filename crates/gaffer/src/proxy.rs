@@ -63,6 +63,53 @@ pub trait Manager {
 
     #[zbus(property)]
     fn version(&self) -> zbus::Result<String>;
+
+    /// The exact build the running daemon was made from.
+    #[zbus(property)]
+    fn build_id(&self) -> zbus::Result<String>;
+}
+
+/// Warn if the running daemon is executing a binary that no longer exists.
+///
+/// The precise symptom of an upgrade that was installed but never restarted.
+/// RPM scriptlets run as root while gafferd runs in the user's session, so a
+/// package upgrade replaces the binary on disk and structurally cannot restart
+/// the service; the old process keeps running its now-unlinked inode. That is
+/// exactly what `/proc/<pid>/exe` reports as `(deleted)`.
+///
+/// Checked rather than inferred from comparing build ids, because a build-id
+/// mismatch is *normal* when running a development CLI against a packaged
+/// daemon, and a warning that cries wolf during ordinary work gets ignored by
+/// the time it matters. An unlinked executable is never normal.
+///
+/// Best effort throughout: every failure here means "cannot tell", and a
+/// diagnostic that cannot tell should say nothing rather than guess.
+pub async fn warn_if_daemon_is_stale(connection: &zbus::Connection) {
+    let Ok(dbus) = zbus::fdo::DBusProxy::new(connection).await else {
+        return;
+    };
+    let Ok(name) = BUS_NAME.try_into() else {
+        return;
+    };
+    let Ok(pid) = dbus.get_connection_unix_process_id(name).await else {
+        return;
+    };
+
+    // Only meaningful for a daemon on this machine, which the session bus
+    // implies; a readlink failure just means we cannot tell.
+    let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else {
+        return;
+    };
+    if !exe.to_string_lossy().ends_with(" (deleted)") {
+        return;
+    }
+
+    // stderr, so `gaffer list --json | jq` stays clean.
+    eprintln!(
+        "warning: gafferd is running a binary that has been replaced on disk \
+         (it was upgraded but never restarted).\n\
+         \x20        Restart it with: systemctl --user restart gaffer.service"
+    );
 }
 
 /// A snapshot of one light as the daemon sees it.

@@ -73,6 +73,14 @@ binding to compositor hotkeys or driving a status-bar module.
 %cargo_prep -v vendor
 
 %build
+# Bake the exact NVR into the daemon, readable at runtime as
+# Manager1.BuildId and `gafferd --version`. The vendored tarball has no git
+# metadata, so without this a packaged build could only report the crate
+# version — which is identical across every snapshot between two releases, and
+# so cannot answer "is the running daemon the one I just installed?". That
+# matters because RPM scriptlets run as root and cannot restart a *user*
+# service: an upgrade replaces the binary while the old process keeps running.
+export GAFFER_BUILD_ID="%{version}-%{release}"
 %cargo_build
 # Record what is statically linked in, for the licence audit trail.
 %{cargo_license_summary}

@@ -255,6 +255,11 @@ check with `firewall-cmd --list-services | grep mdns` and add it with
 install. Re-run `make install-user` and check
 `~/.local/share/dbus-1/services/io.mineiro.gaffer.service` exists.
 
+**Changes from an upgrade did not take effect.** A package upgrade replaces the
+binary but cannot restart a user service, so the old daemon keeps running.
+`gaffer version` shows what is actually running, and the CLI warns when it
+detects this. Fix it with `systemctl --user restart gaffer.service`.
+
 **A light shows `offline`.** gaffer discovered it but cannot reach its HTTP API.
 `gaffer list` prints the transport error next to the address; the daemon retries
 every 15 s and recovers on its own once the light is reachable.

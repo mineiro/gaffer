@@ -105,6 +105,11 @@ enum Command {
     },
     /// Re-probe the network now.
     Rescan,
+    /// Show this tool's version and the build the daemon is actually running.
+    ///
+    /// `--version` reports only this binary. After a package upgrade the two
+    /// can differ, because the daemon keeps running until it is restarted.
+    Version,
     /// Stream state changes until interrupted.
     Watch {
         /// Emit Waybar's `custom/` module JSON, one object per line.
@@ -117,6 +122,11 @@ enum Command {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let connection = proxy::connect().await?;
+
+    // Before doing anything else: an upgrade that was never restarted makes
+    // every result below describe an older gaffer than the one installed, and
+    // the user has no other way to notice.
+    proxy::warn_if_daemon_is_stale(&connection).await;
 
     match cli.command.unwrap_or(Command::List { json: false }) {
         Command::List { json } => {
@@ -165,6 +175,17 @@ async fn main() -> Result<()> {
             println!("unganged {} lights", affected.len());
         }
         Command::Scene { args } => scene(&connection, &args).await?,
+        Command::Version => {
+            println!("gaffer   {}", env!("CARGO_PKG_VERSION"));
+            let manager = ManagerProxy::new(&connection).await?;
+            let version = manager.version().await.context("asking the daemon its version")?;
+            // BuildId is newer than the rest of the interface; an older daemon
+            // simply does not have it, which is itself worth saying plainly.
+            match manager.build_id().await {
+                Ok(build) => println!("gafferd  {version} ({build})"),
+                Err(_) => println!("gafferd  {version} (build unknown — daemon predates BuildId)"),
+            }
+        }
         Command::Rescan => {
             let manager = ManagerProxy::new(&connection).await?;
             manager.rescan().await.context("asking the daemon to rescan")?;

@@ -256,9 +256,30 @@ sudo dnf --refresh upgrade gaffer && systemctl --user restart gaffer.service
 `--refresh` is not optional: dnf caches repository metadata, and this repo
 rebuilds on every push, so a plain upgrade routinely reports nothing to do.
 
+The restart is not optional and cannot be automated away. RPM scriptlets run as
+root while gafferd runs in the user's session, so an upgrade replaces the binary
+on disk and the old process keeps executing its now-unlinked inode. This is not
+hypothetical: it happened, the mDNS fix sat installed-but-not-running, and the
+only reason it surfaced was `/proc/<pid>/exe` reading `(deleted)`.
+
+Two things now make that visible rather than a thing you must remember:
+
+- **`Manager1.BuildId`** reports the exact build — the full NVR for a packaged
+  daemon, `git<sha>` (plus `-dirty`) from a checkout. `Version` deliberately
+  still reports the crate version, which is identical across every snapshot
+  between two releases and therefore cannot answer "is this the build I just
+  installed?". `gaffer version` prints both sides at once.
+- **The CLI warns** when the running daemon's executable has been unlinked,
+  which is the exact signature of upgraded-but-not-restarted. It checks the
+  deleted inode rather than comparing build ids, because a build-id mismatch is
+  *normal* when running a development CLI against a packaged daemon — a warning
+  that cries wolf during ordinary work is ignored by the time it matters.
+
 Clients should probe rather than assume — introspect `Manager1` once at startup
 and fall back when a verb is absent. That keeps a panel working against an older
-daemon instead of failing at the first call.
+daemon instead of failing at the first call. `gaffer version` models this: it
+prints "daemon predates BuildId" rather than failing when the property is
+missing.
 
 ## The D-Bus API is a Contract
 

@@ -648,9 +648,28 @@ impl Manager1 {
             .collect()
     }
 
+    /// The release line, as semver. Same string for every snapshot build
+    /// between two releases — use `BuildId` to tell those apart.
     #[zbus(property)]
     async fn version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
+    }
+
+    /// The exact build this daemon was made from.
+    ///
+    /// For a packaged build this is the full NVR the RPM was built as; for a
+    /// build from a checkout it is `git<sha>`, suffixed `-dirty` if the tree
+    /// had uncommitted changes. `unknown` when neither was available.
+    ///
+    /// Exists because `Version` cannot answer the question that actually
+    /// matters after an upgrade. RPM scriptlets run as root while this runs in
+    /// the user's session, so a package upgrade replaces the binary on disk and
+    /// structurally cannot restart the service — the running daemon keeps
+    /// executing the old, now-unlinked inode until someone restarts it. That
+    /// happened, silently, and there was no way to ask.
+    #[zbus(property(emits_changed_signal = "const"))]
+    async fn build_id(&self) -> String {
+        env!("GAFFER_BUILD_ID").to_string()
     }
 
     #[zbus(property)]
