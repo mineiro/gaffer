@@ -110,9 +110,14 @@ jobs:
           title="gaffer ${GITHUB_REF_NAME#v}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release exists; updating it in place"
+            # --draft=false is not redundant. Deleting a tag to move it makes
+            # GitHub demote its release to a draft, and editing does not undo
+            # that on its own — so a re-cut release would quietly stop being
+            # visible while still looking published to anyone reading the run.
             gh release edit "$GITHUB_REF_NAME" \
               --title "$title" \
               --notes-file "${RUNNER_TEMP}/notes.md" \
+              --draft=false \
               --verify-tag
           else
             gh release create "$GITHUB_REF_NAME" \
