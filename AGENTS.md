@@ -232,23 +232,30 @@ enabled as a system service.
 
 ## The Deployed Build Is the Contract
 
-A client binds to whatever daemon is *running*, not to `main`. Pushing a new
-verb makes it real in the repository and, minutes later, in COPR — but not on
-anyone's machine until they upgrade, which is a manual step. Twice now a client
-has been designed against a verb that was not yet on the bus.
+A client binds to whatever daemon is *running*, not to `main`. Twice now a
+client has been designed against a verb that was not yet on the bus.
+
+The gap widened when packaging moved out. Merging a new verb used to put it in
+COPR minutes later; now nothing is built from `main` at all. A verb reaches
+someone's machine only after a tag, a release, a `Version:` bump in
+[mineiro/rpms](https://github.com/mineiro/rpms), a COPR build, an upgrade, and a
+restart — six steps, four of them deliberate acts by a person. That is the right
+shape, and it makes this rule matter more rather than less.
 
 So when adding to the D-Bus surface, say plainly that it needs an upgrade to
 appear, and check what is actually deployed before discussing availability:
 
 ```sh
 rpm -q gaffer                                    # what is installed
+gaffer version                                   # what is *running*
 busctl --user introspect io.mineiro.gaffer \
     /io/mineiro/gaffer io.mineiro.gaffer.Manager1  # what is on the bus
 sudo dnf --refresh upgrade gaffer && systemctl --user restart gaffer.service
 ```
 
-`--refresh` is not optional: dnf caches repository metadata, and this repo
-rebuilds on every push, so a plain upgrade routinely reports nothing to do.
+`--refresh` is not optional: dnf serves cached repository metadata by default,
+so a newly built release is routinely reported as nothing to do for as long as
+that cache lives.
 
 The restart is not optional and cannot be automated away. RPM scriptlets run as
 root while gafferd runs in the user's session, so an upgrade replaces the binary

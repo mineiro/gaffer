@@ -57,7 +57,14 @@ systemctl --user restart gaffer.service
 actually running.
 
 If you enabled `mineiro/gaffer` before packaging moved out of this repository,
-disable it: `sudo dnf copr disable mineiro/gaffer`.
+remove it — that project no longer exists:
+
+```sh
+sudo dnf copr remove mineiro/gaffer
+```
+
+`disable` is not enough. It leaves the repository file in place with
+`enabled_metadata=1`, still pointing at a URL that now returns 404.
 
 ### NixOS
 
