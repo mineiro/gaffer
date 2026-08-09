@@ -315,10 +315,12 @@ fixed by releasing again, not by re-cutting the tag — so the pre-flight checks
 above matter more, and `.github/release-notes.sh` exists to be run *before* the
 tag is created.
 
-The release workflow re-runs fmt, clippy and the tests against the tagged tree —
-a tag can point at a commit that never passed CI on main, and a release should
-have been tested exactly as tagged — checks the tag agrees with `Cargo.toml` and
-`nix/package.nix`, and publishes. A version bumped in one file but not the other
+The release workflow re-runs fmt, clippy, the tests *and* `cargo audit` against
+the tagged tree — a tag can point at a commit that never passed CI on main, and a
+release should have been tested exactly as tagged — checks the tag agrees with
+`Cargo.toml` and `nix/package.nix`, and publishes. The audit is there because the
+scheduled one cannot cover this moment: an advisory published after the last
+weekly run but before the tag would otherwise ship with every check green. A version bumped in one file but not the other
 fails the job rather than shipping something whose version contradicts its name.
 
 Order does not matter any more. Packaging used to build off the branch webhook,
