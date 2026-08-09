@@ -1,0 +1,67 @@
+name: Audit
+
+# Advisories are published on their own schedule, not yours. A repository that
+# only audits when someone pushes can sit on a known-vulnerable dependency for
+# as long as nobody happens to commit — so the weekly run is the point of this
+# workflow, and the push/PR runs are the cheap extra that catches a bad
+# dependency before it lands.
+#
+# Deliberately no `paths:` filter. A path-filtered job never reports on PRs that
+# do not touch the filtered files, and a *required* check that never reports
+# leaves a PR pending forever. Keeping it unfiltered means this can be added to
+# the branch ruleset later without that trap.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Monday morning, offset off the hour: everything scheduled at :00 competes
+    # for the same runners.
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # Pinned to an immutable commit, not a tag — see the note in ci.yml.
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        run: rustup toolchain install stable --profile minimal
+
+      # `cargo install` rather than a third-party action: this repository pins
+      # every action to a commit precisely to avoid trusting a mutable tag, and
+      # an audit tool arriving through the supply chain it is meant to audit is
+      # the wrong shape. `--locked` builds it against its own committed
+      # lockfile instead of whatever resolves today.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      # Default severity on purpose: this fails on *vulnerabilities* and warns
+      # on unmaintained, unsound and yanked crates.
+      #
+      # `--deny warnings` was the tempting setting and is wrong here. Those
+      # warnings routinely have no fixed version available, and gaffer's
+      # dependencies are almost all transitive — so a warning with no upstream
+      # release would block every unrelated PR until someone silenced it, and
+      # the habit that produces is silencing. Read the warnings; act on them
+      # deliberately, as was done for RUSTSEC-2026-0221.
+      - name: Audit dependencies
+        run: cargo audit
