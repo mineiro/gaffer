@@ -68,6 +68,17 @@ jobs:
           cargo clippy --workspace --all-targets --locked -- -D warnings
           cargo test --workspace --locked
 
+      # Audits run on main and weekly, and neither covers this moment. An
+      # advisory published after the last of those runs but before the tag
+      # would ship in the release with every check green — the audit having
+      # been not wrong but stale. This is the only point where the exact tree
+      # about to be published can be checked against the advisory database, so
+      # it is checked here, for the same reason the gate above is re-run.
+      - name: Audit the tagged tree
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+
       # Release notes come from CHANGELOG.md, which is the canonical record.
       # The script exits non-zero when the version has no section, so a release
       # cannot be published with an empty body.
