@@ -12,9 +12,10 @@ publish.workspace = true
 anyhow = "1.0.104"
 futures-util = "0.3.33"
 gaffer-core.workspace = true
-# 0.20.3 is a floor, not a preference: earlier versions assert in the packet
-# write path on a label of 64 bytes or more, and gaffer feeds received mDNS
-# names straight back into it via `Discovery::verify`. See the note there.
+# This requirement may float upward, but must never go below 0.20.3: earlier
+# versions assert in the packet write path on a label of 64 bytes or more, and
+# gaffer feeds received mDNS names straight back into it via `Discovery::verify`.
+# See the note there.
 mdns-sd = "0.21.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }
