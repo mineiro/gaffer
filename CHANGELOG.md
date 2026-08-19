@@ -2,10 +2,10 @@
 
 Notable changes to gaffer, newest first.
 
-This file is the **canonical** record. The `%changelog` in `gaffer.spec` is a
-derived summary for Fedora's benefit, and the GitHub release notes are
-generated from the section below matching the tag — so this is the one place a
-change needs to be written down.
+This file is the **canonical** record. The GitHub release notes are generated
+from the section below matching the tag, and the `%changelog` in the Fedora
+spec — which now lives in [mineiro/rpms](https://github.com/mineiro/rpms) — is a
+derived summary. This is the one place a change needs to be written down.
 
 Versions follow [semantic versioning](https://semver.org). While gaffer is
 below 1.0 the minor slot carries features and the patch slot carries fixes.
@@ -13,6 +13,12 @@ The D-Bus API is a contract: every entry that touches it says whether the
 change is additive, and so far all of them have been.
 
 ## [Unreleased]
+
+## [0.2.1] — 2026-08-18
+
+Housekeeping: gaffer's behaviour and its D-Bus API are unchanged. Cut so the
+dependency refresh below reaches distro packages, which build from a release
+tarball and the `Cargo.lock` committed beside it rather than from `main`.
 
 ### Changed
 
@@ -24,6 +30,15 @@ change is additive, and so far all of them have been.
   and the COPR project is now `mineiro/rpms`. Enable that instead of
   `mineiro/gaffer`; packages there are built from release tarballs rather than
   from every commit. Nothing about gaffer itself changes.
+- Dependencies refreshed: mdns-sd 0.21.0, zbus 5.19.0, clap 4.6.6 and
+  futures-util 0.3.34. mdns-sd 0.21.0 caps outgoing packets at the Ethernet MTU
+  per RFC 6762 section 17; gaffer only browses and re-probes, so it sends
+  queries and never a response, and the cap does not change what it puts on the
+  wire.
+- Every pull request and a weekly run now check the dependency tree against the
+  RustSec advisory database, and the tagged tree is audited again at release
+  time — an advisory published after the last run would otherwise ship with
+  every check green.
 
 ## [0.2.0] — 2026-08-08
 
@@ -73,5 +88,6 @@ API, the `gaffer` CLI, the Waybar module, and Fedora packaging via COPR.
 
 Never tagged — it shipped only as COPR snapshots.
 
-[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/mineiro/gaffer/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mineiro/gaffer/releases/tag/v0.2.0
