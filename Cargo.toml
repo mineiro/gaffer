@@ -11,7 +11,7 @@ edition = "2024"
 rust-version = "1.88"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/mineiro/gaffer"
-authors = ["Jose Tiburcio Ribeiro Netto <jnetto@mineiro.dev>"]
+authors = ["Jose Tiburcio Ribeiro Netto <jnetto@mineiro.io>"]
 
 # gaffer is distributed as distro packages, not through crates.io. A registry
 # can only copy binaries — it cannot install the systemd unit or the D-Bus
