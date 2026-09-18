@@ -107,6 +107,7 @@ API, the `gaffer` CLI, the Waybar module, and Fedora packaging via COPR.
 
 Never tagged — it shipped only as COPR snapshots.
 
-[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/mineiro/gaffer/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mineiro/gaffer/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mineiro/gaffer/releases/tag/v0.2.0
