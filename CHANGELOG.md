@@ -14,6 +14,25 @@ change is additive, and so far all of them have been.
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-09-17
+
+Housekeeping: gaffer's behaviour and its D-Bus API are unchanged. Cut, like
+0.2.1, so a dependency refresh on `main` reaches distro packages, which build
+from a release tarball and the `Cargo.lock` committed beside it.
+
+### Changed
+
+- Dependencies refreshed: mdns-sd 0.21.3, reqwest 0.13.5 and toml 1.1.5.
+  mdns-sd 0.21.2 fixes an out-of-bounds panic parsing a truncated HINFO record
+  and 0.21.1 hardens name-compression parsing to skip a malformed record rather
+  than the whole packet. gaffer browses the LAN and parses every response it
+  hears, so before this a malformed packet from any peer could panic the
+  responder thread and take discovery down until a restart — the same failure
+  shape the 0.20.3 floor closed for the writer side. reqwest 0.13.5 brings a
+  second copy of `base64` (0.23.1) into the tree beside the 0.22.1 that
+  hyper-util still wants; both are `MIT OR Apache-2.0`, so the effective licence
+  of the binary is unchanged.
+
 ## [0.2.1] — 2026-08-18
 
 Housekeeping: gaffer's behaviour and its D-Bus API are unchanged. Cut so the
