@@ -14,6 +14,24 @@ change is additive, and so far all of them have been.
 
 ## [Unreleased]
 
+### Fixed
+
+- A light whose mDNS record lapsed was removed, even while it was answering
+  HTTP, and was only found again if it happened to announce itself. A record
+  lapsing — TTL expiry or a goodbye — now triggers an immediate HTTP probe and
+  never removes the light: one that answers stays exactly as it was, one that
+  does not shows `offline` and keeps its object path, so panels reading
+  `GetManagedObjects` keep their rows. gaffer also re-queries `_elg._tcp.local.`
+  itself, 1 s after a lapse and every 90 s while a known light's record is
+  missing, so a lamp that does not announce on its own is found again.
+- `Manager1.Rescan` now sends a fresh PTR query. It used to re-confirm only the
+  records still in mDNS's cache, so after a lapse it asked about nothing.
+
+### Changed
+
+- The daemon no longer emits `InterfacesRemoved` for a light. The D-Bus API's
+  shape is unchanged; clients that handle the signal need do nothing.
+
 ## [0.2.2] — 2026-09-17
 
 Housekeeping: gaffer's behaviour and its D-Bus API are unchanged. Cut, like

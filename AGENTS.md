@@ -27,7 +27,7 @@ a socket, a clock, or a config file belongs in `gafferd`.
 
 Three seams, inherited from Photon and still the right decomposition:
 
-- **`discovery`** — *finds* lights. Wraps `mdns-sd`; emits `Discovered`.
+- **`discovery`** — *finds* lights. Wraps `mdns-sd`; emits `Found` and `Lapsed`.
 - **`elgato`** — *speaks* the protocol. Stateless functions over `reqwest`.
 - **`world`** — *remembers*. `World` owns every `LightRecord`.
 
@@ -41,6 +41,13 @@ Every light carries two states:
   drag or a keybind feels instant.
 - `reported` — what the hardware last said. **`None` is the definition of
   offline**, rather than a separate flag that can drift out of sync.
+
+**Discovery finds lights; it never removes them.** An mDNS record lapsing (TTL
+expiry or a goodbye) is a hint to probe over HTTP and to re-query actively, not
+evidence the lamp left. Treating it as removal dropped both lamps on a desk
+whose records lapsed while they answered HTTP the whole time, and nothing ever
+queried for them again. A lamp that is really gone shows `offline` and keeps its
+object path for the life of the daemon, so a panel keeps its rows.
 
 Commands set `desired` and mark the light dirty. The supervisor pushes, then
 adopts the echo. On refresh, `desired` adopts `reported` *only when no push is
@@ -131,8 +138,11 @@ name. luz and Photon both keyed on the instance name, so renaming a light in
 Elgato's app made it appear as a second device. `md=` also gives the model
 without an `accessory-info` round trip.
 
-Cadence: 12 s mDNS re-query (handled by `mdns-sd`), 15 s state refresh, ~90 ms
-debounce coalescing rapid changes into one PUT.
+Cadence: 15 s state refresh, ~90 ms debounce coalescing rapid changes into one
+PUT. mDNS queries back off on `mdns-sd`'s own schedule (1 s doubling to an hour)
+with cache refreshes near TTL expiry; on top of that, gaffer restarts the browse
+1 s after a record lapses and every 90 s while any known light's record is still
+missing, and on `Rescan`. A healthy desk pays nothing extra.
 
 ## Grouping
 

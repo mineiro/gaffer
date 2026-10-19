@@ -281,7 +281,9 @@ detects this. Fix it with `systemctl --user restart gaffer.service`.
 
 **A light shows `offline`.** gaffer discovered it but cannot reach its HTTP API.
 `gaffer list` prints the transport error next to the address; the daemon retries
-every 15 s and recovers on its own once the light is reachable.
+every 15 s and recovers on its own once the light is reachable. Once seen, a
+light stays listed for the life of the daemon even if its mDNS record lapses,
+so an unplugged lamp reads `offline` rather than vanishing.
 
 For anything else, `journalctl --user -u gaffer -f` with
 `systemctl --user set-environment GAFFER_LOG=debug`.
