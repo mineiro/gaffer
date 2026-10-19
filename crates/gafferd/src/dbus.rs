@@ -774,14 +774,6 @@ impl Publisher {
         Ok(())
     }
 
-    /// Withdraw a light. `InterfacesRemoved` follows automatically.
-    pub async fn remove_light(&self, id: &LightId) -> zbus::Result<()> {
-        let path = light_path(id);
-        self.connection.object_server().remove::<Light1, _>(path.as_str()).await?;
-        debug!(%id, %path, "withdrew light from the bus");
-        Ok(())
-    }
-
     /// Emit `PropertiesChanged` for one light.
     pub async fn notify_light(&self, id: &LightId, changed: Changed) {
         self.notify_at(&light_path(id), changed).await;
@@ -988,7 +980,6 @@ mod tests {
         {
             world.insert(crate::world::LightRecord {
                 id: id.to_string(),
-                fullname: format!("{name}._elg._tcp.local."),
                 name: name.to_string(),
                 model: String::new(),
                 firmware: String::new(),

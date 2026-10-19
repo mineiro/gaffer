@@ -14,8 +14,11 @@ futures-util = "0.3.33"
 gaffer-core.workspace = true
 # This requirement may float upward, but must never go below 0.20.3: earlier
 # versions assert in the packet write path on a label of 64 bytes or more, and
-# gaffer feeds received mDNS names straight back into it via `Discovery::verify`.
-# See the note there.
+# mdns-sd's own cache refresh writes received instance names back into queries.
+# Before 0.20.3 its decoder and encoder also disagreed about escaping, so a label
+# ending in a backslash merged with the next into an over-long one: a single
+# crafted advertisement could panic the responder thread and take discovery down
+# until a restart. 0.20.3 reports an error and skips the record instead.
 mdns-sd = "0.21.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json"] }
 serde = { version = "1.0.229", features = ["derive"] }

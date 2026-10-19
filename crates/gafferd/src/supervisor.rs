@@ -143,9 +143,7 @@ impl Supervisor {
             }
             Request::RefreshAll => self.refresh_all().await,
             Request::Rescan => {
-                let fullnames: Vec<String> =
-                    self.world.read().await.iter().map(|light| light.fullname.clone()).collect();
-                self.discovery.verify(&fullnames);
+                self.discovery.requery();
                 self.refresh_all().await;
             }
             Request::Identify(ids) => {
@@ -167,7 +165,13 @@ impl Supervisor {
     async fn on_discovery(&mut self, event: DiscoveryEvent) {
         match event {
             DiscoveryEvent::Found(found) => self.on_found(*found).await,
-            DiscoveryEvent::Lost(id) => self.on_lost(&id).await,
+            // Probe now rather than at the next refresh. A light that still
+            // answers stays exactly as it was; one that does not goes offline
+            // through the ordinary failure path. Either way it stays listed:
+            // the record lapsing says nothing about the lamp, and a panel that
+            // loses its rows every time mDNS hiccups is worse than one showing
+            // a lamp as offline.
+            DiscoveryEvent::Lapsed(id) => self.refresh_one(&id).await,
         }
     }
 
@@ -182,7 +186,6 @@ impl Supervisor {
         if is_new {
             let record = LightRecord {
                 id: found.id.clone(),
-                fullname: found.fullname,
                 name: found.name,
                 model: found.model,
                 firmware: String::new(),
@@ -209,7 +212,6 @@ impl Supervisor {
             // A re-resolve: the address may have moved. Keep state, update route.
             self.update(&found.id, |light| {
                 light.endpoint = endpoint;
-                light.fullname = found.fullname;
                 if !found.model.is_empty() {
                     light.model = found.model;
                 }
@@ -217,22 +219,6 @@ impl Supervisor {
             .await;
             self.refresh_one(&found.id).await;
         }
-    }
-
-    async fn on_lost(&mut self, id: &LightId) {
-        let before = {
-            let mut world = self.world.write().await;
-            let before = GroupSnapshot::of(&world);
-            if world.remove(id).is_none() {
-                return;
-            }
-            before
-        };
-
-        if let Err(error) = self.publisher.remove_light(id).await {
-            debug!(%id, %error, "could not withdraw light from the bus");
-        }
-        self.publish_group_change(before).await;
     }
 
     async fn on_io(&mut self, io: Io) {

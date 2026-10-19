@@ -60,8 +60,6 @@ impl Endpoint {
 #[derive(Clone, Debug)]
 pub struct LightRecord {
     pub id: LightId,
-    /// mDNS instance fullname, kept so discovery can actively re-probe it.
-    pub fullname: String,
     pub name: String,
     pub model: String,
     pub firmware: String,
@@ -189,6 +187,10 @@ impl World {
         self.lights.insert(record.id.clone(), record)
     }
 
+    /// Tests only: the daemon never forgets a light it has seen, because an
+    /// mDNS record lapsing is not the lamp leaving. Tests still need an absent
+    /// lamp to check that gangs and scenes survive one.
+    #[cfg(test)]
     pub fn remove(&mut self, id: &str) -> Option<LightRecord> {
         self.lights.remove(id)
     }
@@ -576,7 +578,6 @@ mod tests {
     fn record(id: &str, name: &str, state: LightState, online: bool) -> LightRecord {
         LightRecord {
             id: id.to_string(),
-            fullname: format!("{name}._elg._tcp.local."),
             name: name.to_string(),
             model: "Elgato Key Light MK.2".to_string(),
             firmware: String::new(),
