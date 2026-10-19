@@ -14,6 +14,11 @@ change is additive, and so far all of them have been.
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-10-19
+
+A fix for lights vanishing while they were still on the network. The D-Bus
+API's shape is unchanged.
+
 ### Fixed
 
 - A light whose mDNS record lapsed was removed, even while it was answering
@@ -125,7 +130,8 @@ API, the `gaffer` CLI, the Waybar module, and Fedora packaging via COPR.
 
 Never tagged — it shipped only as COPR snapshots.
 
-[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/mineiro/gaffer/releases/tag/v0.2.3
 [0.2.2]: https://github.com/mineiro/gaffer/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mineiro/gaffer/releases/tag/v0.2.1
 [0.2.0]: https://github.com/mineiro/gaffer/releases/tag/v0.2.0

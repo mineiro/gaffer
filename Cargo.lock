@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "gaffer"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "clap",
@@ -381,11 +381,11 @@ dependencies = [
 
 [[package]]
 name = "gaffer-core"
-version = "0.2.2"
+version = "0.2.3"
 
 [[package]]
 name = "gafferd"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "futures-util",
