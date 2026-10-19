@@ -1,7 +1,7 @@
 { lib, rustPlatform, src }:
 
 let
-  version = "0.2.2";
+  version = "0.2.3";
 in
 rustPlatform.buildRustPackage {
   pname = "gaffer";
