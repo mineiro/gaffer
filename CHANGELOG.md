@@ -14,6 +14,24 @@ change is additive, and so far all of them have been.
 
 ## [Unreleased]
 
+## [0.2.4] — 2026-11-03
+
+Housekeeping: gaffer's behaviour and its D-Bus API are unchanged. Cut, like
+0.2.1 and 0.2.2, so a dependency refresh on `main` reaches distro packages,
+which build from a release tarball and the `Cargo.lock` committed beside it.
+
+### Changed
+
+- Dependencies refreshed: mdns-sd 0.21.5, tokio 1.53.3, serde_json 1.0.154,
+  toml 1.1.6, clap 4.6.7 and rustix 1.1.5. The mdns-sd fixes are the ones that
+  reach gaffer: its timers now run on a monotonic clock, so setting the system
+  clock back no longer stalls re-queries; system sleep now counts toward cached
+  record TTLs, so after a laptop wakes, stale lights are re-probed rather than
+  trusted; a message carrying an unknown question type no longer causes the
+  supported records beside it to be dropped; and unresolved instances keep
+  being re-queried while browsing. No crate joins or leaves the tree, so the
+  effective licence of the binary is unchanged.
+
 ## [0.2.3] — 2026-10-19
 
 A fix for lights vanishing while they were still on the network. The D-Bus
@@ -130,7 +148,8 @@ API, the `gaffer` CLI, the Waybar module, and Fedora packaging via COPR.
 
 Never tagged — it shipped only as COPR snapshots.
 
-[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/mineiro/gaffer/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/mineiro/gaffer/releases/tag/v0.2.4
 [0.2.3]: https://github.com/mineiro/gaffer/releases/tag/v0.2.3
 [0.2.2]: https://github.com/mineiro/gaffer/releases/tag/v0.2.2
 [0.2.1]: https://github.com/mineiro/gaffer/releases/tag/v0.2.1
